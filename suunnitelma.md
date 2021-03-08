@@ -10,6 +10,7 @@
 - syntaksin ja joidenkin ominaisuuksien mallina Rust
     - ilman borrow checker, pattern matching, traits ym. hienouksia
     - lausekeorientoituneisuus pyrkimyksenä (esim. silmukka voi palauttaa arvon)
+- tietotyypit: 64bit etumerkilliset kokonaisluvut, totuusarvot, tietueet, variantit, merkkijonot
 
 ### Pakolliset ominaisuudet (3op):
 
@@ -22,21 +23,26 @@
 - [ ] jonkinlainen syötteen välitys vähintään ohjelman alussa, esim. muuttujille alkuarvot
 - [ ] jonkinlainen tulostus vähintään ohjelman lopussa, esim. muuttujien loppuarvot
 
+Kohdekieli/tulkkityyppi:
+
+- tulkki (ilman JIT) (0op)
+- tuetut alustat: GNU/Linux AMD64:llä
+
 ### Suunnitellut lisäominaisuudet:
 
- - [ ] Aliohjelmat (0,5op)
+ - [ ] aliohjelmat (0,5op)
     - [ ] rekursiolla (+0,5op)
 - [ ] tietueet ja variantit (1op)
-- [ ] staattinen tyypintarkastus (jos aikaa) (1op)
+- [ ] merkkijonosyöte ja -tulostus (0,5op)
+- [ ] yksinkertainen staattinen tyypintarkastus (jos aikaa) (1op)
 
-Kohdekieli/tulkkityyppi:
-- tulkki (ilman JIT) (0op)
 
 ## Työkalut
-- isäntäkieli: Haskell
+- isäntäkieli: Haskell (GHC 8.10)
 - [BNFC](http://bnfc.digitalgrammars.com/) (mikäli sallittu)
-    - vaihtoehtoisesti parser combinators, [trifecta](https://hackage.haskell.org/package/trifecta)
+    - vaihtoehtoisesti parser combinators, Megaparsec
 - versionhallinta: Git
+    - etävaraston osoite: [https://github.com/atarv/krapu](https://github.com/atarv/krapu)
 
 ## Testaus
 Useita esimerkkiohjelmia ja paljon käsin ajelua. Automaattitestit hspec kirjastolla hyödyntäen QuickCheckiä mahdollisuuksien mukaan. Testejä kirjoitetaan jatkuvasti sitä mukaa kuin ominaisuuksia ja kääntäjän osia valmistuu.
@@ -46,7 +52,7 @@ Projekti on kokonaisuudessaan ryhmän ainoan jäsenen, Aleksi Tarvaisen, vastuul
 
 ## Opintopisteet
 
-Tavoitteena on tienata 5 opintopistettä ja mahdollisesti myös suoritusmerkintä TIES341 Funktio-ohjelmointi 2 -kurssista, koska toteutuskielenä on Haskell (arvioijan harkinnan mukaan).
+Tavoitteena on tienata 6 opintopistettä ja mahdollisesti myös suoritusmerkintä TIES341 Funktio-ohjelmointi 2 -kurssista, koska toteutuskielenä on Haskell (arvioijan harkinnan mukaan).
 
 ## Aikataulu
 Inkrementit
@@ -80,3 +86,87 @@ Inkrementit
     - viimeiset esimerkkiohjelmat
     - staattinen tyypitys (jos aikaa)
     - harjoitustyön palautus 28.5. klo 23.59 mennessä
+
+## Esimerkkiohjelmia
+
+```rust
+/* Klassikko.
+ * Samalla esimerkki monirivisestä kommentista.
+ */
+fn main() {
+    println("Hei, maailma!");
+}
+```
+
+```rust
+fn main() {
+    // Rustista eroten muuttujat on oletuksena mutable. 
+    // Vakioiden toteutus mahdollisesti staattisen tyypityksen yhteydessä.
+    let x: I64 = 0;
+
+    loop {
+        if x > 100 {
+            break;
+        }
+
+        println(
+            // Tässä if-lausekkeen tuloksena on merkkijono
+            if x % 3 == 0 && x % 5 == 0 {
+                "FizzBuzz" // puuttuva puolipiste merkkaa palautettavaa arvoa
+            } else if x % 5 == 0 {
+                "Buzz"
+            } else if x % 3 == 0 {
+                "Fizz"
+            } else {
+                // Mahdollisesti toteutettava staattinen tyypintarkastus
+                // pitää huolen siitä, että tämä ei kääntyisi ilman
+                // kokonaisluvun muuttamista merkkijonoksi.
+                i64_to_str(x)
+            }
+        );
+
+        x = x + 1;
+    }
+}
+```
+
+```rust
+// Tietue
+struct Henkilo {
+    ika: I64,
+    nimi: String
+}
+
+// Aliohjelma
+fn max(a: I64, b: I64) -> I64 {
+    if a >= b {
+        a
+    } else {
+        b
+    }
+}
+
+fn main() {
+    let a: Henkilo = Henkilo { ika: 20, nimi: "Janna-Petteri" };
+    let b: Henkilo = Henkilo { ika: 30, nimi: "Joni-Jossu" };
+
+    a.ika = a.ika + 5;
+
+    println(max(a.ika, b.ika));
+}
+```
+
+```rust
+fn kertoma(n: I64) -> I64 {
+    if n <= 1 {
+        1
+    } else {
+        // rekursiivinen kutsu
+        n + kertoma(n - 1)
+    }
+}
+
+fn main() {
+    println(u64_to_str(kertoma(10)));
+}
+```
