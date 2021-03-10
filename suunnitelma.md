@@ -6,34 +6,35 @@
 
 ## Lähdekieli
 - työnimi: Krapu
-- imperatiivinen, C:n sukuinen
+- paradigma: imperatiivinen
 - syntaksin ja joidenkin ominaisuuksien mallina Rust
-    - ilman borrow checker, pattern matching, traits ym. hienouksia
     - lausekeorientoituneisuus pyrkimyksenä (esim. silmukka voi palauttaa arvon)
+    - ilman borrow checker, pattern matching, traits ym. hienouksia
 - tietotyypit: 64bit etumerkilliset kokonaisluvut, totuusarvot, tietueet, variantit, merkkijonot
 
 ### Pakolliset ominaisuudet (3op):
 
 - [ ] lukukelpoinen (ei binäärimössöä)
 - [ ] kommentit
-- [ ] kokonaislukuaritmetiikka (infix-syntaksilla, ellei erikseen muuta sovita) 
-- [ ] valintojen tekeminen (if tms)
-- [ ] toisto (silmukat, rekursio tms)
+- [ ] kokonaislukuaritmetiikka (infix-syntaksilla) 
+- [ ] valintojen tekeminen (if)
+- [ ] toisto (silmukat)
 - [ ] muuttujat
 - [ ] jonkinlainen syötteen välitys vähintään ohjelman alussa, esim. muuttujille alkuarvot
 - [ ] jonkinlainen tulostus vähintään ohjelman lopussa, esim. muuttujien loppuarvot
 
-Kohdekieli/tulkkityyppi:
+Kohdekieli/tulkkityyppi: 
+- tulkki (ilman välikieltä) (0op)
 
-- tulkki (ilman JIT) (0op)
-- tuetut alustat: GNU/Linux AMD64:llä
+Tuetut alustat:
+- GNU/Linux AMD64:llä
 
 ### Suunnitellut lisäominaisuudet:
 
  - [ ] aliohjelmat (0,5op)
     - [ ] rekursiolla (+0,5op)
-- [ ] tietueet ja variantit (1op)
 - [ ] merkkijonosyöte ja -tulostus (0,5op)
+- [ ] tietueet ja variantit (1op)
 - [ ] yksinkertainen staattinen tyypintarkastus (jos aikaa) (1op)
 
 
@@ -138,7 +139,7 @@ struct Henkilo {
 }
 
 // Aliohjelma
-fn max(a: I64, b: I64) -> I64 {
+fn max(a: I64, b: I64) -> I64 { // Tyyppinimet alkaa isolla kirjaimella
     if a >= b {
         a
     } else {
@@ -167,6 +168,23 @@ fn kertoma(n: I64) -> I64 {
 }
 
 fn main() {
-    println(u64_to_str(kertoma(10)));
+    println(i64_to_str(kertoma(10)));
 }
+```
+
+```rust
+fn main() {                                                                      
+    let x: I64 = 1;                                                               
+                                                                                
+    // loop on myös lauseke. Jos breakille ei anna arvoa, palautetaan Unit
+    let y: I64 = loop {                                                               
+        if x > 100 {                                                             
+            break x;  
+        }                                                                        
+                                                                                
+        x = x + x + 3;                                                              
+    };                                                                           
+                                                                                
+    println(i64_to_str(y));
+ }                                                                                
 ```
