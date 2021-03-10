@@ -40,7 +40,7 @@ Tuetut alustat:
 
 ## Työkalut
 - isäntäkieli: Haskell (GHC 8.10)
-- [BNFC](http://bnfc.digitalgrammars.com/) (mikäli sallittu)
+- ~[BNFC](http://bnfc.digitalgrammars.com/) (mikäli sallittu)~
     - vaihtoehtoisesti parser combinators, Megaparsec
 - versionhallinta: Git
     - etävaraston osoite: [https://github.com/atarv/krapu](https://github.com/atarv/krapu)
