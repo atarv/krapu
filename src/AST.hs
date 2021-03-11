@@ -9,6 +9,7 @@ module AST where
 
 data Expr
     = IntLit Integer -- ^ Integer literal
+    | BoolLit Bool
     | UnaryOp UnaryOperator Expr
     | BinaryOp Operator Expr Expr
     deriving (Show, Eq)
@@ -19,9 +20,12 @@ data Operator
     | Sub -- ^ Subtraction
     | Mul -- ^ Multiplication
     | Div -- ^ Division
+    | And -- ^ Lazy logical AND
+    | Or -- ^ Lazy logical OR
     deriving (Show, Eq)
 
 data UnaryOperator
     = Negate
     | Plus
+    | Not -- ^ Logical NOT
     deriving (Show, Eq)

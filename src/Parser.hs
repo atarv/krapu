@@ -36,13 +36,17 @@ spaceConsumer =
 lexeme :: Parser a -> Parser a
 lexeme = Lex.lexeme spaceConsumer
 
--- | Helper for parsing symbols of the source language
+-- | Helper for parsing symbols and keywords of the source language
 symbol :: Text -> Parser Text
 symbol = Lex.symbol spaceConsumer
 
--- | 
+-- | Use given parser between parentheses
 betweenParens :: Parser a -> Parser a
 betweenParens = between (symbol "(") (symbol ")")
+
+booleanLiteral :: Parser Expr
+booleanLiteral =
+    (BoolLit False <$ symbol "false") <|> (BoolLit True <$ symbol "true")
 
 -- | Parse integer literal. Supports different bases 
 -- (decimal, binary, octal, hexadecimal).
@@ -64,9 +68,11 @@ integerLiteral = fmap IntLit $ lexeme $ do
 operatorTable :: [[Expr.Operator Parser Expr]]
 operatorTable =
     -- Higher precedence
-    [ [unary "-" Negate, unary "+" Plus]
+    [ [unary "-" Negate, unary "+" Plus, unary "!" Not]
     , [binary "*" Mul, binary "/" Div]
     , [binary "+" Add, binary "-" Sub]
+    , [binary "&&" And]
+    , [binary "||" Or]
     ] -- Lower precedence
   where
     -- | Defines an unary operator
@@ -77,9 +83,13 @@ operatorTable =
     binary :: Text -> Operator -> Expr.Operator Parser Expr
     binary name binop = Expr.InfixL $ BinaryOp binop <$ symbol name
 
+-- | Parse a literal expression, which directly describes a value.
+literal :: Parser Expr
+literal = integerLiteral <|> booleanLiteral
+
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term = betweenParens expression <|> integerLiteral <?> "term"
+term = betweenParens expression <|> literal <?> "term"
 
 -- | Parses an expression
 expression :: Parser Expr

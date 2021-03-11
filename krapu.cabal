@@ -26,8 +26,8 @@ source-repository head
 
 library
   exposed-modules:
-    Parser
-    AST
+      Parser
+      AST
   other-modules:
       Paths_krapu
   hs-source-dirs:
