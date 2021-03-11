@@ -8,7 +8,7 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 module AST where
 
 data Expr
-    = IntLit Integer -- ^ Integer literal
+    = IntLit Integer
     | BoolLit Bool
     | UnaryOp UnaryOperator Expr
     | BinaryOp Operator Expr Expr

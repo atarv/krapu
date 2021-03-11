@@ -3,31 +3,41 @@
 
 module Main (main) where
 
-import           Control.Applicative     hiding ( some )
-import           Data.Text                      ( Text )
-import           Data.Void
+import           Test.Hspec.QuickCheck
+
+import           Data.Char
+import           Data.Word                      ( Word )
+import           Data.Text                      ( Text
+                                                , pack
+                                                )
 import           Test.Hspec
 import           Test.Hspec.Megaparsec
+import           Numeric
 import           Text.Megaparsec
 import           Parser
 import           AST
+
+intLiteralTest :: Text -> Integer -> Expectation
+intLiteralTest input value =
+    parse integerLiteral "" input `shouldParse` IntLit value
 
 main :: IO ()
 main = hspec $ do
     describe "Integer literal parser" $ do
         context "parses correctly" $ do
-            it "base-ten integers"
-                $             parse integerLiteral "" "-1234567890"
-                `shouldParse` IntLit (-1234567890)
-            it "binary numbers"
-                $             parse integerLiteral "" "0b0101"
-                `shouldParse` IntLit 5
-            it "octal numbers"
-                $             parse integerLiteral "" "0o755"
-                `shouldParse` IntLit 493
-            it "hexadecimal numbers"
-                $             parse integerLiteral "" "0xfab0"
-                `shouldParse` IntLit 64176
+            prop "base-ten integers"
+                $ \n -> intLiteralTest (pack $ show (n :: Integer)) n
+            prop "binary numbers" $ \n ->
+                let x = fromIntegral (n :: Word) -- limit to non-negative values
+                in  intLiteralTest
+                        (pack $ "0b" <> showIntAtBase 2 intToDigit x "")
+                        x
+            prop "octal numbers" $ \n ->
+                let x = fromIntegral (n :: Word)
+                in  intLiteralTest (pack $ "0o" <> showOct n "") x
+            prop "hexadecimal numbers" $ \n ->
+                let x = fromIntegral (n :: Word)
+                in  intLiteralTest (pack $ "0x" <> showHex n "") x
         context "should fail if" $ do
             it "number is not specified"
                 $              parse integerLiteral ""

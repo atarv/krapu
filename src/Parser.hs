@@ -20,6 +20,7 @@ import qualified Control.Monad.Combinators.Expr
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Data.Void                      ( Void )
+import qualified Data.Set                      as Set
 import           AST
 
 type Parser
@@ -51,14 +52,15 @@ booleanLiteral =
 -- | Parse integer literal. Supports different bases 
 -- (decimal, binary, octal, hexadecimal).
 integerLiteral :: Parser Expr
-integerLiteral = fmap IntLit $ lexeme $ do
-    optional (char '0') >>= \case
-        Just _ -> oneOf ("box" :: [Char]) >>= \case
-            'b' -> Lex.binary
-            'o' -> Lex.octal
-            'x' -> Lex.hexadecimal
-            _ -> fail "This shouldn't happen because all the cases are handled"
-        Nothing -> Lex.signed spaceConsumer (lexeme Lex.decimal)
+integerLiteral = fmap IntLit . lexeme . label "integer literal" $ do
+    nonDefaultBase <|> base10
+  where
+    base10         = Lex.signed spaceConsumer (lexeme Lex.decimal)
+    nonDefaultBase = choice (symbol <$> ["0b", "0o", "0x"]) >>= \case
+        "0b" -> Lex.binary
+        "0o" -> Lex.octal
+        "0x" -> Lex.hexadecimal
+        _    -> fail "This shouldn't happen because all the cases are handled"
 
 -- Usage of @Expr.makeExprParser@ is based on examples from Megaparsec 
 -- documentation and Joseph Morag's MicroC tutorial
