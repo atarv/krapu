@@ -16,12 +16,21 @@ data Expr
 
 -- | Binary operators
 data Operator
+    -- Arithmetic
     = Add -- ^ Addition
     | Sub -- ^ Subtraction
     | Mul -- ^ Multiplication
     | Div -- ^ Division
-    | And -- ^ Lazy logical AND
-    | Or -- ^ Lazy logical OR
+    -- Logical
+    | And -- ^ Lazy AND
+    | Or  -- ^ Lazy OR
+    -- Comparison
+    | Greater
+    | GreaterOrEqual
+    | Lesser
+    | LesserOrEqual
+    | Equal
+    | NotEqual
     deriving (Show, Eq)
 
 data UnaryOperator

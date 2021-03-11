@@ -71,6 +71,12 @@ operatorTable =
     [ [unary "-" Negate, unary "+" Plus, unary "!" Not]
     , [binary "*" Mul, binary "/" Div]
     , [binary "+" Add, binary "-" Sub]
+    , [ binary ">"  Greater        -- Rust disallows comparison operator 
+      , binary "<"  Lesser         -- chaining, but to make things simple
+      , binary ">=" GreaterOrEqual -- and follow C instead
+      , binary "<=" LesserOrEqual
+      ]
+    , [binary "==" Equal, binary "!=" NotEqual]
     , [binary "&&" And]
     , [binary "||" Or]
     ] -- Lower precedence
