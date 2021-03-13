@@ -89,7 +89,7 @@ operatorTable =
 
     -- | Defines an infix left associative binary operator
     binary :: Text -> Operator -> Expr.Operator Parser Expr
-    binary name binop = Expr.InfixL $ BinaryOp binop <$ symbol name
+    binary name binOp = Expr.InfixL $ BinaryOp binOp <$ symbol name
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr

@@ -55,7 +55,9 @@ main = hspec $ do
                               )
 
     describe "Comparison operators" $ do
-        it "equal and not equal should have lesser precedence"
+        it
+                "equal (and not equal) should have lesser precedence than other\ 
+                \ comparison operators"
             $             parse expression "" "true == 1 < 2"
             `shouldParse` BinaryOp Equal
                                    (BoolLit True)

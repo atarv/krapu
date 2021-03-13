@@ -1,6 +1,6 @@
 {-|
 Module         : AST
-Description    : Abstract syntax tree of Krapu
+Description    : Abstract syntax tree of Krapu language
 Copyright      : (c) Aleksi Tarvainen, 2021
 License        : BSD3
 Maintainer     : a.aleksi.tarvainen@student.jyu.fi
@@ -21,7 +21,7 @@ data Operator
     | Sub -- ^ Subtraction
     | Mul -- ^ Multiplication
     | Div -- ^ Division
-    -- Logical
+    -- Boolean
     | And -- ^ Lazy AND
     | Or  -- ^ Lazy OR
     -- Comparison
