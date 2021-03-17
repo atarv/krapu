@@ -62,3 +62,22 @@ main = hspec $ do
             `shouldParse` BinaryOp Equal
                                    (BoolLit True)
                                    (BinaryOp Lesser (IntLit 1) (IntLit 2))
+
+    describe "if expressions" $ do
+        it "should be possible to parse without else case"
+            $             parse ifExpr "" "if 1 < 2 { 3 }"
+            `shouldParse` IfExpr (BinaryOp Lesser (IntLit 1) (IntLit 2))
+                                 (BlockExpr [] (IntLit 3))
+                                 Nothing
+        it "can be nested"
+            $ parse ifExpr
+                    ""
+                    "if if 1 > 2 { false } else { true } { 3 } else { 4 }"
+            `shouldParse` IfExpr
+                              (IfExpr
+                                  (BinaryOp Greater (IntLit 1) (IntLit 2))
+                                  (BlockExpr [] (BoolLit False))
+                                  (Just (BlockExpr [] (BoolLit True)))
+                              )
+                              (BlockExpr [] (IntLit 3))
+                              (Just (BlockExpr [] (IntLit 4)))
