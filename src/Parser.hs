@@ -12,16 +12,19 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Parser where
 
+import           Data.Maybe
+import           Data.Text                      ( Text )
+import           Data.Void                      ( Void )
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
+
+import           AST
+
 import qualified Text.Megaparsec.Char.Lexer    as Lex
 import qualified Control.Monad.Combinators.Expr
                                                as Expr
-import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import           Data.Void                      ( Void )
-import qualified Data.Set                      as Set
-import           AST
+
 
 type Parser
     = Parsec Void -- Custom error component
@@ -45,6 +48,9 @@ symbol = Lex.symbol spaceConsumer
 betweenParens :: Parser a -> Parser a
 betweenParens = between (symbol "(") (symbol ")")
 
+betweenBraces :: Parser a -> Parser a
+betweenBraces = between (symbol "{") (symbol "}")
+
 booleanLiteral :: Parser Expr
 booleanLiteral =
     (BoolLit False <$ symbol "false") <|> (BoolLit True <$ symbol "true")
@@ -60,7 +66,8 @@ integerLiteral = fmap IntLit . lexeme . label "integer literal" $ do
         "0b" -> Lex.binary
         "0o" -> Lex.octal
         "0x" -> Lex.hexadecimal
-        _    -> fail "This shouldn't happen because all the cases are handled"
+        _ ->
+            fail "This shouldn't happen since parser should have failed already"
 
 -- Usage of @Expr.makeExprParser@ is based on examples from Megaparsec 
 -- documentation and Joseph Morag's MicroC tutorial
@@ -97,8 +104,76 @@ literal = integerLiteral <|> booleanLiteral
 
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term = betweenParens expression <|> literal <?> "term"
+term = ifExpr <|> betweenParens expression <|> literal <?> "term"
 
 -- | Parses an expression
 expression :: Parser Expr
 expression = Expr.makeExprParser term operatorTable <?> "expression"
+
+-- Parse an if-else-expression, else is optional.
+-- TODO: add support for else-if
+ifExpr :: Parser Expr
+ifExpr = do
+    symbol "if"
+    condition   <- expression
+    consequenct <- block
+    alternative <- optional $ symbol "else" >> block
+    pure $ IfExpr condition consequenct alternative
+
+-- | Parse a type identifier (starts with upper case letter)
+type_ :: Parser Type
+type_ = lexeme . label "type" $ do
+    initial <- upperChar
+    rest    <- many alphaNumChar
+    pure . Type $ T.singleton initial <> T.pack rest
+
+-- | Parse return type of a function
+returnType :: Parser Type
+returnType = lexeme . label "return type" $ symbol "->" >> type_
+
+-- | Parse an identifier of other language constructs than types
+identifier :: Parser Identifier
+identifier = lexeme . label "identifier" $ do
+    initial <- lowerChar <|> single '_'
+    rest    <- many alphaNumChar
+    pure . Identifier $ T.singleton initial <> T.pack rest
+
+-- | Parse a single function parameter
+functionParam :: Parser Parameter
+functionParam = do
+    name <- identifier
+    symbol ":"
+    (,) name <$> type_
+
+-- | Parse a statement
+statement :: Parser Statement
+statement = try emptyStatement <|> try itemStatement <|> try statementExpr
+  where
+    emptyStatement = StatementEmpty <$ symbol ";"
+    itemStatement  = StatementItem <$> item
+    statementExpr  = StatementExpr <$> expression <* symbol ";"
+
+-- | Parse a block (a bunch of statements enclosed in braces). It may have a
+-- return value.
+block :: Parser Block
+block = betweenBraces $ do
+    stmts     <- many statement
+    -- If given, outer expression is used as block's return value
+    outerExpr <- optional expression
+    pure $ case outerExpr of
+        Nothing   -> Block stmts
+        Just expr -> BlockExpr stmts expr
+
+-- | Parse a function declaration. Return type may be omitted.
+functionDeclaration :: Parser Item
+functionDeclaration = do
+    symbol "fn"
+    name   <- identifier
+    params <-
+        betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
+    -- default to Unit if return type is not defined
+    retType <- fromMaybe (Type "Unit") <$> optional returnType
+    Function name params retType <$> block
+
+item :: Parser Item
+item = functionDeclaration
