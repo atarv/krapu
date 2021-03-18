@@ -46,27 +46,21 @@ main = hspec $ do
     describe "Logical operators" $ do
         it "&& should have higher precedence than ||"
             $             parse expression "" "false || !false && true"
-            `shouldParse` BinaryOp
-                              Or
-                              (BoolLit False)
-                              (BinaryOp And
-                                        (UnaryOp Not (BoolLit False))
-                                        (BoolLit True)
-                              )
+            `shouldParse` (   BoolLit False
+                          :|| ((Not (BoolLit False)) :&& BoolLit True)
+                          )
 
     describe "Comparison operators" $ do
         it
                 "equal (and not equal) should have lesser precedence than other\ 
                 \ comparison operators"
             $             parse expression "" "true == 1 < 2"
-            `shouldParse` BinaryOp Equal
-                                   (BoolLit True)
-                                   (BinaryOp Lesser (IntLit 1) (IntLit 2))
+            `shouldParse` (BoolLit True :== (IntLit 1 :< IntLit 2))
 
     describe "if expressions" $ do
         it "should be possible to parse without else case"
             $             parse ifExpr "" "if 1 < 2 { 3 }"
-            `shouldParse` IfExpr (BinaryOp Lesser (IntLit 1) (IntLit 2))
+            `shouldParse` IfExpr (IntLit 1 :< IntLit 2)
                                  (BlockExpr [] (IntLit 3))
                                  Nothing
         it "can be nested"
@@ -74,10 +68,9 @@ main = hspec $ do
                     ""
                     "if if 1 > 2 { false } else { true } { 3 } else { 4 }"
             `shouldParse` IfExpr
-                              (IfExpr
-                                  (BinaryOp Greater (IntLit 1) (IntLit 2))
-                                  (BlockExpr [] (BoolLit False))
-                                  (Just (BlockExpr [] (BoolLit True)))
+                              (IfExpr (IntLit 1 :> IntLit 2)
+                                      (BlockExpr [] (BoolLit False))
+                                      (Just (BlockExpr [] (BoolLit True)))
                               )
                               (BlockExpr [] (IntLit 3))
                               (Just (BlockExpr [] (IntLit 4)))

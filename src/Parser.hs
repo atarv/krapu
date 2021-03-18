@@ -78,25 +78,23 @@ operatorTable :: [[Expr.Operator Parser Expr]]
 operatorTable =
     -- Higher precedence
     [ [unary "-" Negate, unary "+" Plus, unary "!" Not]
-    , [binary "*" Mul, binary "/" Div]
-    , [binary "+" Add, binary "-" Sub]
-    , [ binary ">"  Greater        -- Rust disallows comparison operator 
-      , binary "<"  Lesser         -- chaining, but to make things simple
-      , binary ">=" GreaterOrEqual -- and follow C instead
-      , binary "<=" LesserOrEqual
+    , [binary "*" (:*), binary "/" (:/)]
+    , [binary "+" (:+), binary "-" (:-)]
+    , [ binary ">"  (:>)  -- Rust disallows comparison operator chaining, but
+      , binary "<"  (:<)  -- to make things simple let's follow C instead
+      , binary ">=" (:>=)
+      , binary "<=" (:<=)
       ]
-    , [binary "==" Equal, binary "!=" NotEqual]
-    , [binary "&&" And]
-    , [binary "||" Or]
+    , [binary "==" (:==), binary "!=" (:!=)]
+    , [binary "&&" (:&&)]
+    , [binary "||" (:||)]
     ] -- Lower precedence
   where
     -- | Defines an unary operator
-    unary :: Text -> UnaryOperator -> Expr.Operator Parser Expr
-    unary name unOp = Expr.Prefix $ UnaryOp unOp <$ symbol name
+    unary name unOp = Expr.Prefix $ unOp <$ symbol name
 
     -- | Defines an infix left associative binary operator
-    binary :: Text -> Operator -> Expr.Operator Parser Expr
-    binary name binOp = Expr.InfixL $ BinaryOp binOp <$ symbol name
+    binary name binOp = Expr.InfixL $ binOp <$ symbol name
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
@@ -114,11 +112,11 @@ expression = Expr.makeExprParser term operatorTable <?> "expression"
 -- TODO: add support for else-if
 ifExpr :: Parser Expr
 ifExpr = do
-    symbol "if"
+    _           <- symbol "if"
     condition   <- expression
-    consequenct <- block
+    consequent  <- block
     alternative <- optional $ symbol "else" >> block
-    pure $ IfExpr condition consequenct alternative
+    pure $ IfExpr condition consequent alternative
 
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
@@ -142,7 +140,7 @@ identifier = lexeme . label "identifier" $ do
 functionParam :: Parser Parameter
 functionParam = do
     name <- identifier
-    symbol ":"
+    _    <- symbol ":"
     (,) name <$> type_
 
 -- | Parse a statement
@@ -167,7 +165,7 @@ block = betweenBraces $ do
 -- | Parse a function declaration. Return type may be omitted.
 functionDeclaration :: Parser Item
 functionDeclaration = do
-    symbol "fn"
+    _      <- symbol "fn"
     name   <- identifier
     params <-
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
@@ -175,5 +173,6 @@ functionDeclaration = do
     retType <- fromMaybe (Type "Unit") <$> optional returnType
     Function name params retType <$> block
 
+-- | Parse an item. Items are components of a crate.
 item :: Parser Item
 item = functionDeclaration
