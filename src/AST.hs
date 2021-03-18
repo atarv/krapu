@@ -48,34 +48,28 @@ data Statement
 
 -- | Expressions always produce a value and may perform side effects
 data Expr
-    = IntLit Integer
+    -- Literals
+    = Unit -- ^ Same as @()@ in Haskell and Rust
+    | IntLit Integer
     | BoolLit Bool
-    | UnaryOp UnaryOperator Expr
-    | BinaryOp Operator Expr Expr
-    | IfExpr Expr Block (Maybe Block)
-    deriving (Show, Eq)
-
--- | Binary operators
-data Operator
     -- Arithmetic
-    = Add -- ^ Addition
-    | Sub -- ^ Subtraction
-    | Mul -- ^ Multiplication
-    | Div -- ^ Division
+    | Negate Expr
+    | Plus Expr
+    | Expr :+ Expr
+    | Expr :- Expr
+    | Expr :* Expr
+    | Expr :/ Expr
     -- Boolean
-    | And -- ^ Lazy AND
-    | Or  -- ^ Lazy OR
+    | Expr :&& Expr
+    | Expr :|| Expr
+    | Not Expr
     -- Comparison
-    | Greater
-    | GreaterOrEqual
-    | Lesser
-    | LesserOrEqual
-    | Equal
-    | NotEqual
-    deriving (Show, Eq)
-
-data UnaryOperator
-    = Negate
-    | Plus
-    | Not -- ^ Boolean NOT
+    | Expr :> Expr
+    | Expr :>= Expr
+    | Expr :< Expr
+    | Expr :<= Expr
+    | Expr :== Expr
+    | Expr :!= Expr
+    -- Expressions with block
+    | IfExpr Expr Block (Maybe Block)
     deriving (Show, Eq)
