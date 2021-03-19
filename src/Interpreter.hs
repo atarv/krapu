@@ -21,7 +21,7 @@ import qualified Data.Text                     as T
 
 -- Took some inspiration from one of the course's example projects: vt-2016
 
--- | Result types are only those that expressions can be evaluated to
+-- | Result types are only those that expressions evaluate to
 data Result
     = ResUnit
     | ResInt Integer
@@ -32,19 +32,23 @@ data Result
 -- Otherwise they return a unit.
 evalBlock :: Block -> Either Text Result
 evalBlock = \case
-    Block stmts               -> evalStatements stmts
+    Block stmts               -> evalStatements stmts >> Right ResUnit
     BlockExpr stmts outerExpr -> evalStatements stmts >> eval outerExpr
   where
-    evalStatements = foldl' (const evalStatement) -- Previous statement's result is discarded
-                            (Right ResUnit) -- Default to unit in case block contains no statements
+    evalStatements = foldl' (const execStatement) -- Previous statement's result is discarded
+                            (Right ()) -- Default to unit in case block contains no statements
 
-evalStatement :: Statement -> Either Text Result
-evalStatement = \case
-    StatementEmpty     -> Right ResUnit
-    StatementExpr expr -> eval expr
-    StatementItem item -> Left "Items cannot be evaluated yet" -- TODO:
+-- | Statements change the program environment (declare new variables and change
+-- their values, define new functions etc.) rather than return values (as
+-- opposed to expressions).
+execStatement :: Statement -> Either Text ()
+execStatement = \case
+    StatementEmpty     -> Right ()
+    StatementExpr expr -> eval expr >> Right ()
+    StatementItem _ -> Left "Items cannot be evaluated yet" -- TODO:
 
--- | Evaluate an expression
+-- | Evaluate an expression. There will always be a result and side effects may
+-- be performed.
 eval :: Expr -> Either Text Result
 eval = \case
     -- Literals
@@ -86,6 +90,7 @@ eval = \case
         ResBool b ->
             if b then evalBlock conseq else maybe (Right ResUnit) evalBlock alt
         val -> errUnexpectedType "bool" val
+    ExprBlock block -> evalBlock block
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
         (ResInt l, ResInt r) -> Right $ ResInt (l `op` r)

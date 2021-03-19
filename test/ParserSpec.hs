@@ -4,7 +4,9 @@
 module ParserSpec (spec) where
 
 import           Data.Char
-import           Data.Text                      ( Text , pack)
+import           Data.Text                      ( Text
+                                                , pack
+                                                )
 import           Numeric
 import           Test.Hspec
 import           Test.Hspec.Megaparsec
@@ -44,7 +46,7 @@ spec = do
         it "&& should have higher precedence than ||"
             $             parse expression "" "false || !false && true"
             `shouldParse` (   BoolLit False
-                          :|| ((Not (BoolLit False)) :&& BoolLit True)
+                          :|| (Not (BoolLit False) :&& BoolLit True)
                           )
 
     describe "Comparison operators" $ do
@@ -60,7 +62,7 @@ spec = do
             `shouldParse` IfExpr (IntLit 1 :< IntLit 2)
                                  (BlockExpr [] (IntLit 3))
                                  Nothing
-        it "can be nested"
+        it "can be used in conditions (as expressions)"
             $ parse ifExpr
                     ""
                     "if if 1 > 2 { false } else { true } { 3 } else { 4 }"
@@ -71,3 +73,12 @@ spec = do
                               )
                               (BlockExpr [] (IntLit 3))
                               (Just (BlockExpr [] (IntLit 4)))
+
+    describe "block expressions" $ do
+        it "can be nested"
+            $             parse blockExpr "" "{ ; { 1 } }"
+            `shouldParse` ExprBlock
+                              (BlockExpr
+                                  [StatementEmpty]
+                                  (ExprBlock (BlockExpr [] (IntLit 1)))
+                              )

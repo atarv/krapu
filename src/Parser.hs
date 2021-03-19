@@ -12,6 +12,7 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Parser where
 
+import           Data.Bifunctor                 ( bimap )
 import           Data.Maybe
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
@@ -102,7 +103,7 @@ literal = integerLiteral <|> booleanLiteral
 
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term = ifExpr <|> betweenParens expression <|> literal <?> "term"
+term = betweenParens expression <|> ifExpr <|> blockExpr <|> literal <?> "term"
 
 -- | Parses an expression
 expression :: Parser Expr
@@ -117,6 +118,9 @@ ifExpr = do
     consequent  <- block
     alternative <- optional $ symbol "else" >> block
     pure $ IfExpr condition consequent alternative
+
+blockExpr :: Parser Expr
+blockExpr = ExprBlock <$> block
 
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
@@ -176,3 +180,13 @@ functionDeclaration = do
 -- | Parse an item. Items are components of a crate.
 item :: Parser Item
 item = functionDeclaration
+
+-- | Parse a whole crate
+crate :: Parser Crate
+crate = Crate <$> some item <* eof
+
+-- | First argument is source file name and second is it's content. @Left@
+-- contains parser error message(s) and @Right@ contains the AST as text
+parseProgram :: String -> Text -> Either Text Text
+parseProgram src content =
+    bimap (T.pack . errorBundlePretty) (T.pack . show) $ parse crate src content

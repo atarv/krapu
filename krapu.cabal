@@ -56,6 +56,7 @@ executable krapu-exe
   build-depends:
       base >=4.7 && <5
     , krapu
+    , text
   default-language: Haskell2010
 
 test-suite krapu-test
