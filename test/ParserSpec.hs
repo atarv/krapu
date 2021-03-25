@@ -82,3 +82,10 @@ spec = do
                                   [StatementEmpty]
                                   (ExprBlock (BlockExpr [] (IntLit 1)))
                               )
+
+    describe "let statements" $ do
+        it "can be parsed"
+            $             parse statement "" "let xyzzy: I64 = 4321 ;"
+            `shouldParse` StatementLet (Identifier "xyzzy")
+                                       (Type "I64")
+                                       (IntLit 4321)

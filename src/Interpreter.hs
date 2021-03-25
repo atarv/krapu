@@ -45,7 +45,8 @@ execStatement :: Statement -> Either Text ()
 execStatement = \case
     StatementEmpty     -> Right ()
     StatementExpr expr -> eval expr >> Right ()
-    StatementItem _ -> Left "Items cannot be evaluated yet" -- TODO:
+    StatementItem _    -> Left "Items cannot be used yet" -- TODO:
+    StatementLet{}     -> Left "Let statements cannot be used yet" -- TODO:
 
 -- | Evaluate an expression. There will always be a result and side effects may
 -- be performed.

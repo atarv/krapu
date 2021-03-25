@@ -149,22 +149,29 @@ functionParam = do
 
 -- | Parse a statement
 statement :: Parser Statement
-statement = try emptyStatement <|> try itemStatement <|> try statementExpr
+statement =
+    try emptyStatement
+        <|> try itemStatement
+        <|> try letStatement
+        <|> try statementExpr
   where
     emptyStatement = StatementEmpty <$ symbol ";"
     itemStatement  = StatementItem <$> item
     statementExpr  = StatementExpr <$> expression <* symbol ";"
+    letStatement =
+        StatementLet
+            <$> (symbol "let" *> identifier)
+            <*> (symbol ":" *> type_)
+            <*> (symbol "=" *> expression)
+            <*  symbol ";"
 
--- | Parse a block (a bunch of statements enclosed in braces). It may have a
--- return value.
+-- | Parse a block (a bunch of statements enclosed in braces). It may have an 
+-- outer expression, which is used as block's return value.
 block :: Parser Block
 block = betweenBraces $ do
-    stmts     <- many statement
+    stmts <- many statement
     -- If given, outer expression is used as block's return value
-    outerExpr <- optional expression
-    pure $ case outerExpr of
-        Nothing   -> Block stmts
-        Just expr -> BlockExpr stmts expr
+    maybe (Block stmts) (BlockExpr stmts) <$> optional expression
 
 -- | Parse a function declaration. Return type may be omitted.
 functionDeclaration :: Parser Item
@@ -181,7 +188,7 @@ functionDeclaration = do
 item :: Parser Item
 item = functionDeclaration
 
--- | Parse a whole crate
+-- | Parse a whole crate. Empty crates are not allowed.
 crate :: Parser Crate
 crate = Crate <$> some item <* eof
 

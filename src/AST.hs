@@ -44,6 +44,7 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
+    | StatementLet Identifier Type Expr
     deriving (Show, Eq)
 
 -- | Expressions always produce a value and may perform side effects
