@@ -19,10 +19,10 @@ import           Data.Text                      ( Text )
 newtype Crate = Crate [Item] deriving Show
 
 -- | Type represents type names
-newtype Type = Type Text deriving (Show, Eq)
+newtype Type = Type Text deriving (Show, Eq, Ord)
 
 -- | Identifiers are the names of variables, constants, parameters etc.
-newtype Identifier = Identifier Text deriving (Show, Eq)
+newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
@@ -53,6 +53,8 @@ data Expr
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
+    -- Variables
+    | Var Identifier
     -- Arithmetic
     | Negate Expr
     | Plus Expr

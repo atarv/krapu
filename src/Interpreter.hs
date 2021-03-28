@@ -7,15 +7,17 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 -}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Interpreter where
 
+import           Data.IORef
 import           Control.Monad
-import           Data.List                      ( foldl' )
-import           Data.Text                      ( Text )
+import           Data.Map.Strict                ( Map )
 
 import           AST
 
+import qualified Data.Map.Strict               as Map
 import qualified Data.Text                     as T
 
 
@@ -28,90 +30,160 @@ data Result
     | ResBool Bool
     deriving (Show, Eq, Ord)
 
+-- | Symbol table holds variables and their values
+type SymTable = [Map Identifier (IORef Result)]
+
+-- | Environment of the interpreted program
+type Env = IORef SymTable
+
+-- | Creates a blank environment
+emptyEnv :: IO Env
+emptyEnv = newIORef [Map.empty]
+
+-- TODO: remove or move to test spec
+exampleEnv :: IO Env
+exampleEnv = do
+    foo  <- newIORef $ ResInt 1
+    bar  <- newIORef $ ResInt 42
+    baz  <- newIORef $ ResBool False
+    foo2 <- newIORef $ ResBool True
+    newIORef
+        [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
+        , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
+        ]
+
+-- | Lookup a variable's value. Fails if variable is not defined yet.
+lookupVar :: Env -> Identifier -> IO Result
+lookupVar envRef idf = do
+    env <- readIORef envRef
+    case foldr lookVar Nothing env of
+        Just valRef -> readIORef valRef
+        Nothing ->
+            let (Identifier var) = idf
+            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+  where
+    lookVar vars found = case Map.lookup idf vars of
+        Nothing -> found
+        valRef  -> valRef
+
+-- | Define a new variable and it's value. Note that there is no check for
+--  existing values, because shadowing variables is allowed.
+defineVar :: Env -> Identifier -> Result -> IO Env
+defineVar envRef idf val = do
+    valRef <- newIORef val
+    modifyIORef envRef (addVar valRef)
+    pure envRef
+  where
+    addVar valRef (env : envs) = Map.insert idf valRef env : envs
+    addVar valRef []           = [Map.insert idf valRef Map.empty]
+
+
+-- | Print environment starting from the innermost context
+printEnv :: Env -> IO ()
+printEnv env = do
+    -- TODO: cleanup the implementation
+    env' <- readIORef env
+    forM_ env' $ \context ->
+        let varValPairs = Map.toDescList context
+        in
+            do
+                putStrLn "----"
+                forM_ varValPairs $ \(Identifier i, valRef) ->
+                    readIORef valRef >>= \val ->
+                        putStrLn (T.unpack i <> " = " <> show val)
+
 -- | Blocks evaluate to their outer expression's result, if they have one.
 -- Otherwise they return a unit.
-evalBlock :: Block -> Either Text Result
-evalBlock = \case
-    Block stmts               -> evalStatements stmts >> Right ResUnit
-    BlockExpr stmts outerExpr -> evalStatements stmts >> eval outerExpr
-  where
-    evalStatements = foldl' (const execStatement) -- Previous statement's result is discarded
-                            (Right ()) -- Default to unit in case block contains no statements
+evalBlock :: Env -> Block -> IO (Env, Result)
+evalBlock env = \case
+    Block stmts -> (, ResUnit) <$> evalStatements env stmts
+    BlockExpr stmts outerExpr ->
+        evalStatements env stmts >>= flip eval outerExpr
+    where evalStatements = foldM execStatement
 
 -- | Statements change the program environment (declare new variables and change
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
-execStatement :: Statement -> Either Text ()
-execStatement = \case
-    StatementEmpty     -> Right ()
-    StatementExpr expr -> eval expr >> Right ()
-    StatementItem _    -> Left "Items cannot be used yet" -- TODO:
-    StatementLet{}     -> Left "Let statements cannot be used yet" -- TODO:
+execStatement :: Env -> Statement -> IO Env
+execStatement env = \case
+    StatementEmpty              -> pure env
+    StatementExpr expr          -> fst <$> eval env expr
+    StatementItem _             -> fail "Items cannot be used yet" -- TODO:
+    StatementLet idf _type expr -> do
+        (env', result) <- eval env expr
+        defineVar env' idf result
 
 -- | Evaluate an expression. There will always be a result and side effects may
 -- be performed.
-eval :: Expr -> Either Text Result
-eval = \case
+eval :: Env -> Expr -> IO (Env, Result)
+eval env = \case
     -- Literals
-    Unit        -> Right ResUnit
-    IntLit  i   -> Right $ ResInt i
-    BoolLit b   -> Right $ ResBool b
+    Unit        -> pure (env, ResUnit)
+    IntLit  i   -> pure (env, ResInt i)
+    BoolLit b   -> pure (env, ResBool b)
+
+    -- Variables
+    Var     idf -> (env, ) <$> lookupVar env idf
 
     -- Arithmetic
-    lhs :+ rhs  -> binaryIntOp (+) lhs rhs
-    lhs :- rhs  -> binaryIntOp (-) lhs rhs
-    lhs :* rhs  -> binaryIntOp (*) lhs rhs
-    lhs :/ rhs  -> binaryIntOp div lhs rhs
-    Negate expr -> eval expr >>= \case
-        (ResInt i) -> Right $ ResInt (-i)
-        val        -> errUnexpectedType "integer" val
-    Plus expr -> eval expr >>= \case
-        (ResInt i) -> Right $ ResInt i
-        val        -> errUnexpectedType "integer" val
+    lhs :+ rhs  -> binaryIntOp env (+) lhs rhs
+    lhs :- rhs  -> binaryIntOp env (-) lhs rhs
+    lhs :* rhs  -> binaryIntOp env (*) lhs rhs
+    lhs :/ rhs  -> binaryIntOp env div lhs rhs
+    Negate expr -> eval env expr >>= \case
+        (env', ResInt i) -> pure (env', ResInt (-i))
+        (_   , val     ) -> errUnexpectedType "integer" val
+    Plus expr -> eval env expr >>= \case
+        (env', ResInt i) -> pure (env', ResInt i)
+        (_   , val     ) -> errUnexpectedType "integer" val
 
     -- Boolean
-    lhs :&& rhs -> binaryBoolOp (&&) lhs rhs
-    lhs :|| rhs -> binaryBoolOp (||) lhs rhs
-    Not expr    -> eval expr >>= \case
-        ResBool b -> Right $ ResBool (not b)
-        val       -> errUnexpectedType "bool" val
+    lhs :&& rhs -> binaryBoolOp env (&&) lhs rhs
+    lhs :|| rhs -> binaryBoolOp env (||) lhs rhs
+    Not expr    -> eval env expr >>= \case
+        (env', ResBool b) -> pure (env', ResBool (not b))
+        (_   , val      ) -> errUnexpectedType "bool" val
 
     -- Comparison
-    lhs :<  rhs            -> comparisonOp (<) lhs rhs
-    lhs :>  rhs            -> comparisonOp (>) lhs rhs
-    lhs :<= rhs            -> comparisonOp (<=) lhs rhs
-    lhs :>= rhs            -> comparisonOp (>=) lhs rhs
+    lhs :<  rhs            -> comparisonOp env (<) lhs rhs
+    lhs :>  rhs            -> comparisonOp env (>) lhs rhs
+    lhs :<= rhs            -> comparisonOp env (<=) lhs rhs
+    lhs :>= rhs            -> comparisonOp env (>=) lhs rhs
 
     -- Equality
-    lhs :== rhs            -> equalityOp (==) lhs rhs
-    lhs :!= rhs            -> equalityOp (/=) lhs rhs
+    lhs :== rhs            -> equalityOp env (==) lhs rhs
+    lhs :!= rhs            -> equalityOp env (/=) lhs rhs
 
     -- Expressions with blocks
-    IfExpr cond conseq alt -> eval cond >>= \case
-        ResBool b ->
-            if b then evalBlock conseq else maybe (Right ResUnit) evalBlock alt
-        val -> errUnexpectedType "bool" val
-    ExprBlock block -> evalBlock block
+    IfExpr cond conseq alt -> eval env cond >>= \case
+    -- TODO: begin new blocks by adding a new scope
+        (env', ResBool b) -> if b
+            then evalBlock env' conseq
+            else maybe (pure (env', ResUnit)) (evalBlock env') alt
+        (_, val) -> errUnexpectedType "bool" val
+    ExprBlock block -> evalBlock env block
   where
-    binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (ResInt l, ResInt r) -> Right $ ResInt (l `op` r)
-        (l       , r       ) -> typeMismatch l r
-    binaryBoolOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (ResBool l, ResBool r) -> Right $ ResBool (l `op` r)
-        (l        , r        ) -> typeMismatch l r
-    comparisonOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (l@(ResInt _), r@(ResInt _)) -> Right $ ResBool (l `op` r)
-        (l           , r           ) -> typeMismatch l r
-    equalityOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (l@(ResBool _), r@(ResBool _)) -> Right $ ResBool (l `op` r)
-        (l@(ResInt  _), r@(ResInt _) ) -> Right $ ResBool (l `op` r)
-        (l            , r            ) -> typeMismatch l r
+    binaryIntOp env op lhs rhs = evalToPair env lhs rhs >>= \case
+        (env', ResInt l, ResInt r) -> pure (env', ResInt (l `op` r))
+        (_   , l       , r       ) -> typeMismatch l r
+    binaryBoolOp env op lhs rhs = evalToPair env lhs rhs >>= \case
+        (env', ResBool l, ResBool r) -> pure (env', ResBool (l `op` r))
+        (_   , l        , r        ) -> typeMismatch l r
+    comparisonOp env op lhs rhs = evalToPair env lhs rhs >>= \case
+        (env', l@(ResInt _), r@(ResInt _)) -> pure (env', ResBool (l `op` r))
+        (_   , l           , r           ) -> typeMismatch l r
+    equalityOp env op lhs rhs = evalToPair env lhs rhs >>= \case
+        (env', l@(ResBool _), r@(ResBool _)) -> pure (env', ResBool (l `op` r))
+        (env', l@(ResInt _) , r@(ResInt _) ) -> pure (env', ResBool (l `op` r))
+        (_   , l            , r            ) -> typeMismatch l r
     typeMismatch lhs rhs =
-        Left $ "Type mismatch: " <> T.pack (show lhs) <> ", " <> T.pack
-            (show rhs)
+        fail $ concat ["Type mismatch: ", show lhs, ", ", show rhs]
     errUnexpectedType expected value =
-        Left $ "Unexpected type: expected " <> expected <> ", got " <> T.pack
-            (show value)
+        fail $ concat
+            ["Unexpected type: expected ", expected, ", got ", show value]
     -- Evaluate two expressions to a pair so they can be pattern matched easily
-    evalToPair :: Expr -> Expr -> Either Text (Result, Result)
-    evalToPair a b = liftM2 (,) (eval a) (eval b)
+    evalToPair :: Env -> Expr -> Expr -> IO (Env, Result, Result)
+    evalToPair env a b = do
+        (env' , resA) <- eval env a
+        (env'', resB) <- eval env' b
+        pure (env'', resA, resB)
