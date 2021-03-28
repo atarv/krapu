@@ -63,7 +63,7 @@ integerLiteral = fmap IntLit . lexeme . label "integer literal" $ do
     nonDefaultBase <|> base10
   where
     base10         = Lex.signed spaceConsumer (lexeme Lex.decimal)
-    nonDefaultBase = choice (symbol <$> ["0b", "0o", "0x"]) >>= \case
+    nonDefaultBase = choice (chunk <$> ["0b", "0o", "0x"]) >>= \case
         "0b" -> Lex.binary
         "0o" -> Lex.octal
         "0x" -> Lex.hexadecimal

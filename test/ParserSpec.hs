@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module ParserSpec (spec) where
+module ParserSpec
+    ( spec
+    )
+where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -41,6 +44,9 @@ spec = do
             it "number is not specified"
                 $              parse integerLiteral ""
                 `shouldFailOn` "0x"
+            it "there is whitespace between the base prefix and literal value"
+                $              parse integerLiteral ""
+                `shouldFailOn` "0x ff"
 
     describe "Logical operators" $ do
         it "&& should have higher precedence than ||"
