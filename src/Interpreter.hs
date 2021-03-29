@@ -11,8 +11,9 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Interpreter where
 
-import           Data.IORef
+import           Control.Exception              ( bracket )
 import           Control.Monad
+import           Data.IORef
 import           Data.Map.Strict                ( Map )
 
 import           AST
@@ -22,6 +23,7 @@ import qualified Data.Text                     as T
 
 
 -- Took some inspiration from one of the course's example projects: vt-2016
+-- and Write Yourself a Scheme in 48 hours
 
 -- | Result types are only those that expressions evaluate to
 data Result
@@ -39,18 +41,6 @@ type Env = IORef SymTable
 -- | Creates a blank environment
 emptyEnv :: IO Env
 emptyEnv = newIORef [Map.empty]
-
--- TODO: remove or move to test spec
-exampleEnv :: IO Env
-exampleEnv = do
-    foo  <- newIORef $ ResInt 1
-    bar  <- newIORef $ ResInt 42
-    baz  <- newIORef $ ResBool False
-    foo2 <- newIORef $ ResBool True
-    newIORef
-        [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
-        , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
-        ]
 
 -- | Lookup a variable's value. Fails if variable is not defined yet.
 lookupVar :: Env -> Identifier -> IO Result
@@ -71,12 +61,26 @@ lookupVar envRef idf = do
 defineVar :: Env -> Identifier -> Result -> IO Env
 defineVar envRef idf val = do
     valRef <- newIORef val
-    modifyIORef envRef (addVar valRef)
+    modifyIORef' envRef (addVar valRef)
     pure envRef
   where
     addVar valRef (env : envs) = Map.insert idf valRef env : envs
     addVar valRef []           = [Map.insert idf valRef Map.empty]
 
+-- | @withinNewScope env a@ Execute given action @a@ in a new scope added to 
+-- the environment @env@. Once the action is complete, scope is exited 
+-- automatically.
+withinNewScope :: Env -> (Env -> IO b) -> IO b
+withinNewScope env = bracket (beginScope env) exitScope
+  where
+    beginScope env = do
+        modifyIORef env (Map.empty :)
+        pure env
+    exitScope env = do
+        -- Using tail here should be safe since a new scope is always added 
+        -- before exiting
+        modifyIORef' env tail
+        pure env
 
 -- | Print environment starting from the innermost context
 printEnv :: Env -> IO ()
@@ -96,9 +100,9 @@ printEnv env = do
 -- Otherwise they return a unit.
 evalBlock :: Env -> Block -> IO (Env, Result)
 evalBlock env = \case
-    Block stmts -> (, ResUnit) <$> evalStatements env stmts
+    Block stmts -> (, ResUnit) <$> withinNewScope env (`evalStatements` stmts)
     BlockExpr stmts outerExpr ->
-        evalStatements env stmts >>= flip eval outerExpr
+        withinNewScope env (flip evalStatements stmts >=> flip eval outerExpr)
     where evalStatements = foldM execStatement
 
 -- | Statements change the program environment (declare new variables and change
@@ -175,6 +179,7 @@ eval env = \case
     equalityOp env op lhs rhs = evalToPair env lhs rhs >>= \case
         (env', l@(ResBool _), r@(ResBool _)) -> pure (env', ResBool (l `op` r))
         (env', l@(ResInt _) , r@(ResInt _) ) -> pure (env', ResBool (l `op` r))
+        (env', l@ResUnit    , r@ResUnit    ) -> pure (env', ResBool (l `op` r))
         (_   , l            , r            ) -> typeMismatch l r
     typeMismatch lhs rhs =
         fail $ concat ["Type mismatch: ", show lhs, ", ", show rhs]

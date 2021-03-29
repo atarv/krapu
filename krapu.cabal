@@ -77,4 +77,5 @@ test-suite krapu-test
     , megaparsec
     , text
     , QuickCheck
+    , containers
   default-language: Haskell2010

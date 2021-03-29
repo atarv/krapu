@@ -1,17 +1,28 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module InterpreterSpec
-    ( spec
-    )
-where
+module InterpreterSpec (spec) where
 
+import           Data.IORef
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
 
 import           AST
 import           Interpreter
 
+import qualified Data.Map.Strict as Map
+
+
+exampleEnv :: IO Env
+exampleEnv = do
+    foo  <- newIORef $ ResInt 1
+    bar  <- newIORef $ ResInt 42
+    baz  <- newIORef $ ResBool False
+    foo2 <- newIORef $ ResBool True
+    newIORef
+        [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
+        , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
+        ]
 
 spec :: Spec
 spec = do
@@ -23,12 +34,11 @@ spec = do
                     (  (IntLit a :+ (IntLit b :/ Negate (IntLit c)))
                     :- (IntLit d :* Plus (IntLit e))
                     )
-            in
-                if (c :: Integer) == 0 -- Avoid division by zero
+            in  if (c :: Integer) == 0 -- Avoid division by zero
                     then True `shouldBe` True -- FIXME: check for ArithException
                     else do
                         (_, result) <- testCase
-                        result `shouldBe` (ResInt (a + b `div` (-c) - d * e))
+                        result `shouldBe` ResInt (a + b `div` (-c) - d * e)
 
     describe "If expressions" $ do
         env <- runIO emptyEnv
@@ -39,7 +49,7 @@ spec = do
                         (BlockExpr [] (BoolLit conseq))
                         (Just (BlockExpr [] (BoolLit alt)))
                 )
-            result `shouldBe` (ResBool $ if cond then conseq else alt)
+            result `shouldBe` ResBool (if cond then conseq else alt)
 
     describe "Let statement" $ do
         let testCase testEnv = do
@@ -48,7 +58,7 @@ spec = do
                     env
                     (StatementLet (Identifier "foo")
                                   (Type "I64")
-                                  ((IntLit 22) :+ (IntLit 20))
+                                  (IntLit 22 :+ IntLit 20)
                     )
                 lookupVar env' (Identifier "foo")
         it "should add a variable definition to environment"
@@ -66,11 +76,34 @@ spec = do
             pure (foo, baz)
 
         it "works for the simplest case (current context)" $ do
-            foo `shouldBe` (ResInt 1)
+            foo `shouldBe` ResInt 1
         it "looks upwards the context hierarchy" $ do
-            baz `shouldBe` (ResBool False)
+            baz `shouldBe` ResBool False
         it "fails if variable does not exist"
             $ let noVar = do
                       env <- exampleEnv
                       eval env (Var $ Identifier "doesNotExist")
               in  noVar `shouldThrow` anyException
+        it "looks in outer context(s) if variable is not found on current" $ do
+            let testOuterContext = fmap snd $ exampleEnv >>= flip
+                    evalBlock
+                    (BlockExpr
+                        [StatementLet (Identifier "x") (Type "I64") (IntLit 2)]
+                        (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
+                    )
+                in testOuterContext `shouldReturn` ResInt 2
+        it "variables defined in exited scopes shouldn't be available" $ do
+            let accessInnerScope = fmap snd $ exampleEnv >>= flip
+                    evalBlock
+                    (BlockExpr
+                        [ StatementExpr $ ExprBlock $ Block 
+                            [ StatementLet 
+                                    (Identifier "x") 
+                                    (Type "I64") 
+                                    (IntLit 2)
+                            ]
+                        ]
+                        (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
+                    )
+                in accessInnerScope `shouldThrow` anyException
+
