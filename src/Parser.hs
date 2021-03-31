@@ -16,15 +16,17 @@ import           Data.Bifunctor                 ( bimap )
 import           Data.Maybe
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
+import           Data.Set                       ( Set )
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 
 import           AST
 
-import qualified Text.Megaparsec.Char.Lexer    as Lex
 import qualified Control.Monad.Combinators.Expr
                                                as Expr
+import qualified Data.Set                      as Set
 import qualified Data.Text                     as T
+import qualified Text.Megaparsec.Char.Lexer    as Lex
 
 
 type Parser
@@ -51,6 +53,10 @@ betweenParens = between (symbol "(") (symbol ")")
 
 betweenBraces :: Parser a -> Parser a
 betweenBraces = between (symbol "{") (symbol "}")
+
+-- | Reserved words of the language. These cannot be used as identifiers.
+reservedWords :: Set Text
+reservedWords = Set.fromList ["else", "fn", "if", "let"]
 
 booleanLiteral :: Parser Expr
 booleanLiteral =
@@ -89,21 +95,33 @@ operatorTable =
     , [binary "==" (:==), binary "!=" (:!=)]
     , [binary "&&" (:&&)]
     , [binary "||" (:||)]
+    , [binaryR "=" (:=)]
     ] -- Lower precedence
   where
     -- | Defines an unary operator
     unary name unOp = Expr.Prefix $ unOp <$ symbol name
-
     -- | Defines an infix left associative binary operator
     binary name binOp = Expr.InfixL $ binOp <$ symbol name
+    -- | Defines an infix right associative binary operator
+    binaryR name binOp = Expr.InfixR $ binOp <$ symbol name
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
 literal = integerLiteral <|> booleanLiteral
 
+-- | Parse a variable access
+variable :: Parser Expr
+variable = Var <$> identifier
+
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term = betweenParens expression <|> ifExpr <|> blockExpr <|> literal <?> "term"
+term =
+    betweenParens expression
+        <|> ifExpr
+        <|> blockExpr
+        <|> literal
+        <|> variable
+        <?> "term"
 
 -- | Parses an expression
 expression :: Parser Expr
@@ -138,7 +156,10 @@ identifier :: Parser Identifier
 identifier = lexeme . label "identifier" $ do
     initial <- lowerChar <|> single '_'
     rest    <- many alphaNumChar
-    pure . Identifier $ T.singleton initial <> T.pack rest
+    let idf = T.singleton initial <> T.pack rest
+    if idf `Set.notMember` reservedWords
+        then pure $ Identifier idf
+        else fail "keywords cannot be used as identifiers"
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter

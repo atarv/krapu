@@ -76,4 +76,6 @@ data Expr
     -- Expressions with block
     | IfExpr Expr Block (Maybe Block)
     | ExprBlock Block
+    -- Assignment
+    | Expr := Expr
     deriving (Show, Eq)

@@ -42,19 +42,25 @@ type Env = IORef SymTable
 emptyEnv :: IO Env
 emptyEnv = newIORef [Map.empty]
 
+-- | @findVarRef e i@ Find reference to value of the variable which identifier 
+-- @i@ refers to (in environment @e@).
+findVarRef :: Env -> Identifier -> IO (Maybe (IORef Result))
+findVarRef envRef idf = do
+    env <- readIORef envRef
+    pure $ foldr lookVar Nothing env
+  where
+    lookVar vars found = case idf `Map.lookup` vars of
+        Nothing -> found
+        valRef  -> valRef
+
 -- | Lookup a variable's value. Fails if variable is not defined yet.
 lookupVar :: Env -> Identifier -> IO Result
 lookupVar envRef idf = do
-    env <- readIORef envRef
-    case foldr lookVar Nothing env of
+    findVarRef envRef idf >>= \case
         Just valRef -> readIORef valRef
         Nothing ->
             let (Identifier var) = idf
             in  fail $ "Variable '" <> T.unpack var <> "' not found"
-  where
-    lookVar vars found = case Map.lookup idf vars of
-        Nothing -> found
-        valRef  -> valRef
 
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.
@@ -67,6 +73,16 @@ defineVar envRef idf val = do
     addVar valRef (env : envs) = Map.insert idf valRef env : envs
     addVar valRef []           = [Map.insert idf valRef Map.empty]
 
+-- | Assign value to variable
+assignVar :: Env -> Identifier -> Result -> IO Env
+assignVar envRef idf val = do
+    findVarRef envRef idf >>= \case
+        Just valRef -> modifyIORef' valRef (const val)
+        Nothing ->
+            let (Identifier var) = idf
+            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+    pure envRef
+
 -- | @withinNewScope env a@ Execute given action @a@ in a new scope added to 
 -- the environment @env@. Once the action is complete, scope is exited 
 -- automatically.
@@ -74,7 +90,7 @@ withinNewScope :: Env -> (Env -> IO b) -> IO b
 withinNewScope env = bracket (beginScope env) exitScope
   where
     beginScope env = do
-        modifyIORef env (Map.empty :)
+        modifyIORef' env (Map.empty :)
         pure env
     exitScope env = do
         -- Using tail here should be safe since a new scope is always added 
@@ -158,6 +174,11 @@ eval env = \case
     lhs :== rhs            -> equalityOp env (==) lhs rhs
     lhs :!= rhs            -> equalityOp env (/=) lhs rhs
 
+    -- Assignment
+    (Var idf) := rhs -> eval env rhs >>= \case
+        (env', res) -> (, res) <$> assignVar env' idf res
+    e := _ -> fail $ "Cannot assign to expression " <> show e
+
     -- Expressions with blocks
     IfExpr cond conseq alt -> eval env cond >>= \case
     -- TODO: begin new blocks by adding a new scope
@@ -165,7 +186,7 @@ eval env = \case
             then evalBlock env' conseq
             else maybe (pure (env', ResUnit)) (evalBlock env') alt
         (_, val) -> errUnexpectedType "bool" val
-    ExprBlock block -> evalBlock env block
+    ExprBlock block  -> evalBlock env block
   where
     binaryIntOp env op lhs rhs = evalToPair env lhs rhs >>= \case
         (env', ResInt l, ResInt r) -> pure (env', ResInt (l `op` r))

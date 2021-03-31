@@ -107,3 +107,21 @@ spec = do
                     )
                 in accessInnerScope `shouldThrow` anyException
 
+    describe "Assignment expression" $ do
+        it "sets variable's value" $ do
+            let assignment = fmap snd $ exampleEnv >>= flip evalBlock
+                    (BlockExpr 
+                        [StatementExpr (Var (Identifier "foo") := IntLit 75)] 
+                        (Var (Identifier "foo"))
+                    )
+                in assignment `shouldReturn` ResInt 75
+        it "may be chained and it's right associative" $ do
+            let chainedAssignment = fmap snd $ exampleEnv >>= flip evalBlock 
+                    (BlockExpr
+                        [StatementExpr $ Var (Identifier "bar") 
+                            := (Var (Identifier "foo") 
+                            := IntLit 0)
+                        ]
+                        (Var (Identifier "bar"))
+                    )
+                in chainedAssignment `shouldReturn` ResInt 0
