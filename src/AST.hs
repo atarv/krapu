@@ -76,6 +76,10 @@ data Expr
     -- Expressions with block
     | IfExpr Expr Block (Maybe Block)
     | ExprBlock Block
+    | Loop Block
+    | While Expr Block
     -- Assignment
     | Expr := Expr
+    -- Misc
+    | Break Expr
     deriving (Show, Eq)

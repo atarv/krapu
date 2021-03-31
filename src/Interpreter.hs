@@ -165,28 +165,30 @@ eval env = \case
         (_   , val      ) -> errUnexpectedType "bool" val
 
     -- Comparison
-    lhs :<  rhs            -> comparisonOp env (<) lhs rhs
-    lhs :>  rhs            -> comparisonOp env (>) lhs rhs
-    lhs :<= rhs            -> comparisonOp env (<=) lhs rhs
-    lhs :>= rhs            -> comparisonOp env (>=) lhs rhs
+    lhs       :<  rhs -> comparisonOp env (<) lhs rhs
+    lhs       :>  rhs -> comparisonOp env (>) lhs rhs
+    lhs       :<= rhs -> comparisonOp env (<=) lhs rhs
+    lhs       :>= rhs -> comparisonOp env (>=) lhs rhs
 
     -- Equality
-    lhs :== rhs            -> equalityOp env (==) lhs rhs
-    lhs :!= rhs            -> equalityOp env (/=) lhs rhs
+    lhs       :== rhs -> equalityOp env (==) lhs rhs
+    lhs       :!= rhs -> equalityOp env (/=) lhs rhs
 
     -- Assignment
-    (Var idf) := rhs -> eval env rhs >>= \case
+    (Var idf) :=  rhs -> eval env rhs >>= \case
         (env', res) -> (, res) <$> assignVar env' idf res
-    e := _ -> fail $ "Cannot assign to expression " <> show e
+    err := _               -> fail $ "Cannot assign to expression " <> show err
 
     -- Expressions with blocks
     IfExpr cond conseq alt -> eval env cond >>= \case
-    -- TODO: begin new blocks by adding a new scope
         (env', ResBool b) -> if b
             then evalBlock env' conseq
             else maybe (pure (env', ResUnit)) (evalBlock env') alt
         (_, val) -> errUnexpectedType "bool" val
-    ExprBlock block  -> evalBlock env block
+    ExprBlock block      -> evalBlock env block
+    While condition body -> evalWhile env condition body
+    Loop  _body          -> fail "loop not implemented" -- TODO:
+    Break _expr          -> fail "break not implemented" -- TODO:
   where
     binaryIntOp env op lhs rhs = evalToPair env lhs rhs >>= \case
         (env', ResInt l, ResInt r) -> pure (env', ResInt (l `op` r))
@@ -213,3 +215,15 @@ eval env = \case
         (env' , resA) <- eval env a
         (env'', resB) <- eval env' b
         pure (env'', resA, resB)
+
+    evalWhile :: Env -> Expr -> Block -> IO (Env, Result)
+    evalWhile env condition body = do
+        eval env condition >>= \case
+            (env', ResBool continue) -> if continue
+                then evalBlock env' body
+                    >>= \(env'', _) -> evalWhile env'' condition body
+                else pure (env', ResUnit)
+            (_, err) ->
+                fail
+                    $  "Loop predicate must evaluate to boolean value, got"
+                    <> show err

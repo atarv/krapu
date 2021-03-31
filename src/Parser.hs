@@ -140,6 +140,15 @@ ifExpr = do
 blockExpr :: Parser Expr
 blockExpr = ExprBlock <$> block
 
+loop :: Parser Expr
+loop = Loop <$ symbol "loop" <*> block
+
+whileLoop :: Parser Expr
+whileLoop = While <$ symbol "while" <*> expression <*> block
+
+breakExpr :: Parser Expr
+breakExpr = Break <$ symbol "break" <*> option Unit expression
+
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
 type_ = lexeme . label "type" $ do

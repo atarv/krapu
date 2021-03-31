@@ -10,7 +10,7 @@ import           Test.Hspec.QuickCheck
 import           AST
 import           Interpreter
 
-import qualified Data.Map.Strict as Map
+import qualified Data.Map.Strict               as Map
 
 
 exampleEnv :: IO Env
@@ -91,37 +91,57 @@ spec = do
                         [StatementLet (Identifier "x") (Type "I64") (IntLit 2)]
                         (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
                     )
-                in testOuterContext `shouldReturn` ResInt 2
+            testOuterContext `shouldReturn` ResInt 2
         it "variables defined in exited scopes shouldn't be available" $ do
-            let accessInnerScope = fmap snd $ exampleEnv >>= flip
+            let
+                accessInnerScope = fmap snd $ exampleEnv >>= flip
                     evalBlock
                     (BlockExpr
-                        [ StatementExpr $ ExprBlock $ Block 
-                            [ StatementLet 
-                                    (Identifier "x") 
-                                    (Type "I64") 
-                                    (IntLit 2)
-                            ]
+                        [ StatementExpr
+                          $ ExprBlock
+                          $ Block
+                                [ StatementLet (Identifier "x")
+                                               (Type "I64")
+                                               (IntLit 2)
+                                ]
                         ]
                         (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
                     )
-                in accessInnerScope `shouldThrow` anyException
+            accessInnerScope `shouldThrow` anyException
 
     describe "Assignment expression" $ do
         it "sets variable's value" $ do
-            let assignment = fmap snd $ exampleEnv >>= flip evalBlock
-                    (BlockExpr 
-                        [StatementExpr (Var (Identifier "foo") := IntLit 75)] 
+            let assignment = fmap snd $ exampleEnv >>= flip
+                    evalBlock
+                    (BlockExpr
+                        [StatementExpr (Var (Identifier "foo") := IntLit 75)]
                         (Var (Identifier "foo"))
                     )
-                in assignment `shouldReturn` ResInt 75
-        it "may be chained and it's right associative" $ do
-            let chainedAssignment = fmap snd $ exampleEnv >>= flip evalBlock 
+            assignment `shouldReturn` ResInt 75
+        it "can be chained and it's right associative" $ do
+            let chainedAssignment = fmap snd $ exampleEnv >>= flip
+                    evalBlock
                     (BlockExpr
-                        [StatementExpr $ Var (Identifier "bar") 
-                            := (Var (Identifier "foo") 
-                            := IntLit 0)
+                        [ StatementExpr
+                          $  Var (Identifier "bar")
+                          := (Var (Identifier "foo") := IntLit 0)
                         ]
                         (Var (Identifier "bar"))
                     )
-                in chainedAssignment `shouldReturn` ResInt 0
+            chainedAssignment `shouldReturn` ResInt 0
+
+    describe "While loop" $ do
+        it "executes loop body until loop predicate is false" $ do
+            let envAfterLoop = fmap fst $ exampleEnv >>= flip
+                    eval
+                    (While
+                        (Var (Identifier "foo") :< IntLit 10)
+                        (Block
+                            [ StatementExpr
+                              $  Var (Identifier "foo")
+                              := (Var (Identifier "foo") :+ IntLit 4)
+                            ]
+                        )
+                    )
+                lookupFoo = envAfterLoop >>= flip lookupVar (Identifier "foo")
+            lookupFoo `shouldReturn` ResInt 13
