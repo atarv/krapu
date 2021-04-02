@@ -113,14 +113,12 @@ printEnv env =
                 return $ T.unpack idf <> " = " <> show val <> "\n"
             )
 
--- | Blocks evaluate to their outer expression's result, if they have one.
--- Otherwise they return a unit.
+-- | Blocks evaluate to their outer expression's result.
 evalBlock :: Env -> Block -> IO (Env, Result)
 evalBlock env = \case
-    Block stmts -> (, ResUnit) <$> withinNewScope env (`evalStatements` stmts)
-    BlockExpr stmts outerExpr ->
-        withinNewScope env (flip evalStatements stmts >=> flip eval outerExpr)
-    where evalStatements = foldM execStatement
+    Block stmts outerExpr ->
+        withinNewScope env (flip execStatements stmts >=> flip eval outerExpr)
+    where execStatements = foldM execStatement
 
 -- | Statements change the program environment (declare new variables and change
 -- their values, define new functions etc.) rather than return values (as

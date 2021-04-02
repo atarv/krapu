@@ -56,7 +56,7 @@ betweenBraces = between (symbol "{") (symbol "}")
 
 -- | Reserved words of the language. These cannot be used as identifiers.
 reservedWords :: Set Text
-reservedWords = Set.fromList ["else", "fn", "if", "let"]
+reservedWords = Set.fromList ["else", "fn", "if", "let", "while"]
 
 booleanLiteral :: Parser Expr
 booleanLiteral =
@@ -156,10 +156,6 @@ type_ = lexeme . label "type" $ do
     rest    <- many alphaNumChar
     pure . Type $ T.singleton initial <> T.pack rest
 
--- | Parse return type of a function
-returnType :: Parser Type
-returnType = lexeme . label "return type" $ symbol "->" >> type_
-
 -- | Parse an identifier of other language constructs than types
 identifier :: Parser Identifier
 identifier = lexeme . label "identifier" $ do
@@ -200,19 +196,22 @@ statement =
 block :: Parser Block
 block = betweenBraces $ do
     stmts <- many statement
-    -- If given, outer expression is used as block's return value
-    maybe (Block stmts) (BlockExpr stmts) <$> optional expression
+    Block stmts <$> option Unit expression
 
 -- | Parse a function declaration. Return type may be omitted.
 functionDeclaration :: Parser Item
-functionDeclaration = do
-    _      <- symbol "fn"
-    name   <- identifier
-    params <-
+functionDeclaration =
+    Function
+        <$  symbol "fn"
+        <*> identifier
+        <*> paramList
+        <*> returnTypeDefault
+        <*> block
+  where
+    returnType        = lexeme . label "return type" $ symbol "->" >> type_
+    returnTypeDefault = fromMaybe (Type "Unit") <$> optional returnType
+    paramList =
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
-    -- default to Unit if return type is not defined
-    retType <- fromMaybe (Type "Unit") <$> optional returnType
-    Function name params retType <$> block
 
 -- | Parse an item. Items are components of a crate.
 item :: Parser Item

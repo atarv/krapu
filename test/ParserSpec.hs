@@ -1,10 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module ParserSpec
-    ( spec
-    )
-where
+module ParserSpec (spec) where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -64,9 +61,9 @@ spec = do
 
     describe "if expressions" $ do
         it "should be possible to parse without else case"
-            $             parse ifExpr "" "if 1 < 2 { 3 }"
+            $             parse ifExpr "" "if 1 < 2 { 3; }"
             `shouldParse` IfExpr (IntLit 1 :< IntLit 2)
-                                 (BlockExpr [] (IntLit 3))
+                                 (Block [StatementExpr $ IntLit 3] Unit)
                                  Nothing
         it "can be used in conditions (as expressions)"
             $ parse ifExpr
@@ -74,19 +71,18 @@ spec = do
                     "if if 1 > 2 { false } else { true } { 3 } else { 4 }"
             `shouldParse` IfExpr
                               (IfExpr (IntLit 1 :> IntLit 2)
-                                      (BlockExpr [] (BoolLit False))
-                                      (Just (BlockExpr [] (BoolLit True)))
+                                      (Block [] (BoolLit False))
+                                      (Just (Block [] (BoolLit True)))
                               )
-                              (BlockExpr [] (IntLit 3))
-                              (Just (BlockExpr [] (IntLit 4)))
+                              (Block [] (IntLit 3))
+                              (Just (Block [] (IntLit 4)))
 
     describe "block expressions" $ do
         it "can be nested"
             $             parse blockExpr "" "{ ; { 1 } }"
             `shouldParse` ExprBlock
-                              (BlockExpr
-                                  [StatementEmpty]
-                                  (ExprBlock (BlockExpr [] (IntLit 1)))
+                              (Block [StatementEmpty]
+                                     (ExprBlock (Block [] (IntLit 1)))
                               )
 
     describe "let statements" $ do

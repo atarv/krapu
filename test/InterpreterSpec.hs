@@ -46,8 +46,8 @@ spec = do
             (_, result) <- eval
                 env
                 (IfExpr (BoolLit cond)
-                        (BlockExpr [] (BoolLit conseq))
-                        (Just (BlockExpr [] (BoolLit alt)))
+                        (Block [] (BoolLit conseq))
+                        (Just (Block [] (BoolLit alt)))
                 )
             result `shouldBe` ResBool (if cond then conseq else alt)
 
@@ -87,25 +87,23 @@ spec = do
         it "looks in outer context(s) if variable is not found on current" $ do
             let testOuterContext = fmap snd $ exampleEnv >>= flip
                     evalBlock
-                    (BlockExpr
+                    (Block
                         [StatementLet (Identifier "x") (Type "I64") (IntLit 2)]
-                        (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
+                        (ExprBlock $ Block [] (Var $ Identifier "x"))
                     )
             testOuterContext `shouldReturn` ResInt 2
         it "variables defined in exited scopes shouldn't be available" $ do
-            let
-                accessInnerScope = fmap snd $ exampleEnv >>= flip
+            let accessInnerScope = fmap snd $ exampleEnv >>= flip
                     evalBlock
-                    (BlockExpr
-                        [ StatementExpr
-                          $ ExprBlock
-                          $ Block
-                                [ StatementLet (Identifier "x")
-                                               (Type "I64")
-                                               (IntLit 2)
-                                ]
+                    (Block
+                        [ StatementExpr $ ExprBlock $ Block
+                              [ StatementLet (Identifier "x")
+                                             (Type "I64")
+                                             (IntLit 2)
+                              ]
+                              Unit
                         ]
-                        (ExprBlock $ BlockExpr [] (Var $ Identifier "x"))
+                        (ExprBlock $ Block [] (Var $ Identifier "x"))
                     )
             accessInnerScope `shouldThrow` anyException
 
@@ -113,7 +111,7 @@ spec = do
         it "sets variable's value" $ do
             let assignment = fmap snd $ exampleEnv >>= flip
                     evalBlock
-                    (BlockExpr
+                    (Block
                         [StatementExpr (Var (Identifier "foo") := IntLit 75)]
                         (Var (Identifier "foo"))
                     )
@@ -121,7 +119,7 @@ spec = do
         it "can be chained and it's right associative" $ do
             let chainedAssignment = fmap snd $ exampleEnv >>= flip
                     evalBlock
-                    (BlockExpr
+                    (Block
                         [ StatementExpr
                           $  Var (Identifier "bar")
                           := (Var (Identifier "foo") := IntLit 0)
@@ -141,6 +139,7 @@ spec = do
                               $  Var (Identifier "foo")
                               := (Var (Identifier "foo") :+ IntLit 4)
                             ]
+                            Unit
                         )
                     )
                 lookupFoo = envAfterLoop >>= flip lookupVar (Identifier "foo")

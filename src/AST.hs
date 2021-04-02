@@ -34,9 +34,8 @@ type Parameter = (Identifier, Type)
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
 data Block
-    = Block [Statement]
     -- | Outer expression will determine the return value of the block
-    | BlockExpr [Statement] Expr
+    = Block [Statement] Expr
     deriving (Show, Eq)
 
 -- | Single statement
