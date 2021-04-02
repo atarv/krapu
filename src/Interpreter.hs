@@ -13,6 +13,8 @@ module Interpreter where
 
 import           Control.Exception              ( bracket )
 import           Control.Monad
+import           Data.Foldable                  ( traverse_ )
+import           Data.List                      ( intercalate )
 import           Data.IORef
 import           Data.Map.Strict                ( Map )
 
@@ -70,7 +72,7 @@ defineVar envRef idf val = do
     modifyIORef' envRef (addVar valRef)
     pure envRef
   where
-    addVar valRef (env : envs) = Map.insert idf valRef env : envs
+    addVar valRef (ctx : ctxs) = Map.insert idf valRef ctx : ctxs
     addVar valRef []           = [Map.insert idf valRef Map.empty]
 
 -- | Assign value to variable
@@ -100,17 +102,16 @@ withinNewScope env = bracket (beginScope env) exitScope
 
 -- | Print environment starting from the innermost context
 printEnv :: Env -> IO ()
-printEnv env = do
-    -- TODO: cleanup the implementation
-    env' <- readIORef env
-    forM_ env' $ \context ->
-        let varValPairs = Map.toDescList context
-        in
-            do
-                putStrLn "----"
-                forM_ varValPairs $ \(Identifier i, valRef) ->
-                    readIORef valRef >>= \val ->
-                        putStrLn (T.unpack i <> " = " <> show val)
+printEnv env =
+    readIORef env >>= traverse printValVarPairs >>= putStrLn . intercalate
+        "---\n"
+  where
+    printValVarPairs = do
+        Map.foldMapWithKey
+            (\(Identifier idf) valRef -> do
+                val <- readIORef valRef
+                return $ T.unpack idf <> " = " <> show val <> "\n"
+            )
 
 -- | Blocks evaluate to their outer expression's result, if they have one.
 -- Otherwise they return a unit.
