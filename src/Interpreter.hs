@@ -14,8 +14,9 @@ module Interpreter where
 import           Control.Exception              ( bracket )
 import           Control.Monad
 import           Data.Foldable                  ( traverse_ )
-import           Data.List                      ( intercalate )
+import           Data.Functor
 import           Data.IORef
+import           Data.List                      ( intercalate )
 import           Data.Map.Strict                ( Map )
 
 import           AST
@@ -48,8 +49,7 @@ emptyEnv = newIORef [Map.empty]
 -- @i@ refers to (in environment @e@).
 findVarRef :: Env -> Identifier -> IO (Maybe (IORef Result))
 findVarRef envRef idf = do
-    env <- readIORef envRef
-    pure $ foldr lookVar Nothing env
+    readIORef envRef <&> foldr lookVar Nothing
   where
     lookVar vars found = case idf `Map.lookup` vars of
         Nothing -> found
@@ -102,16 +102,14 @@ withinNewScope env = bracket (beginScope env) exitScope
 
 -- | Print environment starting from the innermost context
 printEnv :: Env -> IO ()
-printEnv env =
-    readIORef env >>= traverse printValVarPairs >>= putStrLn . intercalate
-        "---\n"
+printEnv env = readIORef env >>= traverse showValVarPairs >>= putStr . separate
   where
-    printValVarPairs = do
-        Map.foldMapWithKey
-            (\(Identifier idf) valRef -> do
-                val <- readIORef valRef
-                return $ T.unpack idf <> " = " <> show val <> "\n"
-            )
+    separate        = intercalate "---\n"
+    showValVarPairs = Map.foldMapWithKey
+        (\(Identifier idf) valRef -> do
+            val <- readIORef valRef
+            return $ T.unpack idf <> " = " <> show val <> "\n"
+        )
 
 -- | Blocks evaluate to their outer expression's result.
 evalBlock :: Env -> Block -> IO (Env, Result)
@@ -176,18 +174,21 @@ eval env = \case
     -- Assignment
     (Var idf) :=  rhs -> eval env rhs >>= \case
         (env', res) -> (, res) <$> assignVar env' idf res
-    err := _               -> fail $ "Cannot assign to expression " <> show err
+    err := _ -> fail $ "Cannot assign to expression " <> show err
 
     -- Expressions with blocks
-    IfExpr cond conseq alt -> eval env cond >>= \case
-        (env', ResBool b) -> if b
-            then evalBlock env' conseq
-            else maybe (pure (env', ResUnit)) (evalBlock env') alt
+    IfExpr ((cond, conseq) : elseIfs) alt -> eval env cond >>= \case
+        (env', ResBool b) ->
+            if b then evalBlock env' conseq else eval env' $ IfExpr elseIfs alt
         (_, val) -> errUnexpectedType "bool" val
+    IfExpr [] (Just alt) -> evalBlock env alt
+    IfExpr [] Nothing    -> pure (env, ResUnit)
     ExprBlock block      -> evalBlock env block
     While condition body -> evalWhile env condition body
-    Loop  _body          -> fail "loop not implemented" -- TODO:
-    Break _expr          -> fail "break not implemented" -- TODO:
+    Loop  body           -> evalWhile env (BoolLit True) body
+
+    -- Misc
+    Break _expr          -> fail "break not implemented"
   where
     binaryIntOp env op lhs rhs = evalToPair env lhs rhs >>= \case
         (env', ResInt l, ResInt r) -> pure (env', ResInt (l `op` r))

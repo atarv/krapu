@@ -14,9 +14,9 @@ module Parser where
 
 import           Data.Bifunctor                 ( bimap )
 import           Data.Maybe
+import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
-import           Data.Set                       ( Set )
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 
@@ -127,15 +127,14 @@ term =
 expression :: Parser Expr
 expression = Expr.makeExprParser term operatorTable <?> "expression"
 
--- Parse an if-else-expression, else is optional.
--- TODO: add support for else-if
+-- | Parse an if-else-expression, else is optional.
 ifExpr :: Parser Expr
 ifExpr = do
-    _           <- symbol "if"
-    condition   <- expression
-    consequent  <- block
-    alternative <- optional $ symbol "else" >> block
-    pure $ IfExpr condition consequent alternative
+    IfExpr <$> ((:) <$> ifBranch <*> many elseIfBranch) <*> optional elseBranch
+  where
+    ifBranch     = (,) <$ symbol "if" <*> expression <*> block
+    elseIfBranch = (,) <$ symbol "else if" <*> expression <*> block
+    elseBranch   = symbol "else" >> block
 
 blockExpr :: Parser Expr
 blockExpr = ExprBlock <$> block
@@ -205,11 +204,11 @@ functionDeclaration =
         <$  symbol "fn"
         <*> identifier
         <*> paramList
-        <*> returnTypeDefault
+        <*> returnType
         <*> block
   where
-    returnType        = lexeme . label "return type" $ symbol "->" >> type_
-    returnTypeDefault = fromMaybe (Type "Unit") <$> optional returnType
+    returnType =
+        label "return type" $ option (Type "Unit") $ symbol "->" >> type_
     paramList =
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
 

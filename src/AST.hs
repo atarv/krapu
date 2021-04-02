@@ -73,7 +73,7 @@ data Expr
     | Expr :== Expr
     | Expr :!= Expr
     -- Expressions with block
-    | IfExpr Expr Block (Maybe Block)
+    | IfExpr [(Expr, Block)] (Maybe Block)
     | ExprBlock Block
     | Loop Block
     | While Expr Block

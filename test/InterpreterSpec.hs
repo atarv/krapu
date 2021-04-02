@@ -45,11 +45,30 @@ spec = do
         prop "condition is handled correctly" $ \(cond, conseq, alt) -> do
             (_, result) <- eval
                 env
-                (IfExpr (BoolLit cond)
-                        (Block [] (BoolLit conseq))
+                (IfExpr [(BoolLit cond, Block [] (BoolLit conseq))]
                         (Just (Block [] (BoolLit alt)))
                 )
             result `shouldBe` ResBool (if cond then conseq else alt)
+        prop "else if branches are handled"
+            $ \(condIf, condElseIf, conseqIf, conseqElseIf, alt) -> do
+                  (_, result) <- eval
+                      env
+                      (IfExpr
+                          [ (BoolLit condIf, Block [] (BoolLit conseqIf))
+                          , ( BoolLit condElseIf
+                            , Block [] (BoolLit conseqElseIf)
+                            )
+                          ]
+                          (Just $ Block [] (BoolLit alt))
+                      )
+                  result
+                      `shouldBe` ResBool
+                                     (if condIf
+                                         then conseqIf
+                                         else if condElseIf
+                                             then conseqElseIf
+                                             else alt
+                                     )
 
     describe "Let statement" $ do
         let testCase testEnv = do

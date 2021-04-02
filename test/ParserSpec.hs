@@ -62,20 +62,38 @@ spec = do
     describe "if expressions" $ do
         it "should be possible to parse without else case"
             $             parse ifExpr "" "if 1 < 2 { 3; }"
-            `shouldParse` IfExpr (IntLit 1 :< IntLit 2)
-                                 (Block [StatementExpr $ IntLit 3] Unit)
-                                 Nothing
+            `shouldParse` IfExpr
+                              [ ( IntLit 1 :< IntLit 2
+                                , Block [StatementExpr $ IntLit 3] Unit
+                                )
+                              ]
+                              Nothing
         it "can be used in conditions (as expressions)"
             $ parse ifExpr
                     ""
                     "if if 1 > 2 { false } else { true } { 3 } else { 4 }"
             `shouldParse` IfExpr
-                              (IfExpr (IntLit 1 :> IntLit 2)
-                                      (Block [] (BoolLit False))
-                                      (Just (Block [] (BoolLit True)))
-                              )
-                              (Block [] (IntLit 3))
+                              [ ( IfExpr
+                                    [ ( IntLit 1 :> IntLit 2
+                                      , Block [] (BoolLit False)
+                                      )
+                                    ]
+                                    (Just $ Block [] (BoolLit True))
+                                , Block [] (IntLit 3)
+                                )
+                              ]
                               (Just (Block [] (IntLit 4)))
+        it "can have else if branches"
+            $             parse ifExpr "" "if -2 < i { 1 } else if i == 0 { 2 }"
+            `shouldParse` IfExpr
+                              [ ( Negate (IntLit 2) :< Var (Identifier "i")
+                                , Block [] (IntLit 1)
+                                )
+                              , ( Var (Identifier "i") :== IntLit 0
+                                , Block [] (IntLit 2)
+                                )
+                              ]
+                              Nothing
 
     describe "block expressions" $ do
         it "can be nested"
