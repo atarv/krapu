@@ -81,4 +81,5 @@ data Expr
     | Expr := Expr
     -- Misc
     | Break Expr
+    | FnCall Identifier [Expr]
     deriving (Show, Eq)

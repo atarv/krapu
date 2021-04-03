@@ -19,10 +19,33 @@ exampleEnv = do
     bar  <- newIORef $ ResInt 42
     baz  <- newIORef $ ResBool False
     foo2 <- newIORef $ ResBool True
-    newIORef
-        [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
-        , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
-        ]
+    Env
+        <$> newIORef
+                [ Map.fromList
+                    [(Identifier "foo", foo), (Identifier "bar", bar)]
+                , Map.fromList
+                    [(Identifier "baz", baz), (Identifier "foo", foo2)]
+                ]
+        <*> pure exampleFnDefs
+
+exampleFnDefs :: FnDefs
+exampleFnDefs = [Map.fromList [min]]
+  where
+    min =
+        ( Identifier "min"
+        , FnDef
+            [Identifier "a", Identifier "b"]
+            (Block
+                []
+                (IfExpr
+                    [ ( Var (Identifier "a") :<= Var (Identifier "b")
+                      , Block [] (Var (Identifier "a"))
+                      )
+                    ]
+                    (Just (Block [] (Var (Identifier "b"))))
+                )
+            )
+        )
 
 spec :: Spec
 spec = do
@@ -163,3 +186,16 @@ spec = do
                     )
                 lookupFoo = envAfterLoop >>= flip lookupVar (Identifier "foo")
             lookupFoo `shouldReturn` ResInt 13
+
+    describe "Function calls" $ do
+        it "succeed when supplied correct number of arguments" $ do
+            let fnCall = fmap snd $ exampleEnv >>= flip
+                    eval
+                    (FnCall (Identifier "min") [IntLit (-2), IntLit 0])
+            fnCall `shouldReturn` ResInt (-2)
+        it "fail with inccorrect number of arguments" $ do
+            let fnCall = fmap snd $ exampleEnv >>= flip
+                    eval
+                    (FnCall (Identifier "min") [IntLit (-2), IntLit 2, IntLit 3]
+                    )
+            fnCall `shouldThrow` anyException

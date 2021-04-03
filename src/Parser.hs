@@ -13,7 +13,6 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 module Parser where
 
 import           Data.Bifunctor                 ( bimap )
-import           Data.Maybe
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
@@ -107,7 +106,7 @@ operatorTable =
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
-literal = integerLiteral <|> booleanLiteral
+literal = integerLiteral <|> try booleanLiteral
 
 -- | Parse a variable access
 variable :: Parser Expr
@@ -120,6 +119,7 @@ term =
         <|> ifExpr
         <|> blockExpr
         <|> literal
+        <|> try functionCall
         <|> variable
         <?> "term"
 
@@ -159,7 +159,7 @@ type_ = lexeme . label "type" $ do
 identifier :: Parser Identifier
 identifier = lexeme . label "identifier" $ do
     initial <- lowerChar <|> single '_'
-    rest    <- many alphaNumChar
+    rest    <- many (alphaNumChar <|> single '_')
     let idf = T.singleton initial <> T.pack rest
     if idf `Set.notMember` reservedWords
         then pure $ Identifier idf
@@ -196,6 +196,12 @@ block :: Parser Block
 block = betweenBraces $ do
     stmts <- many statement
     Block stmts <$> option Unit expression
+
+-- | Parse a function call
+functionCall :: Parser Expr
+functionCall = do
+    FnCall <$> identifier <*> argList
+    where argList = betweenParens (expression `sepBy` symbol ",")
 
 -- | Parse a function declaration. Return type may be omitted.
 functionDeclaration :: Parser Item
