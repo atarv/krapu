@@ -317,6 +317,5 @@ eval env = \case
 runProgram :: Crate -> IO ()
 runProgram (Crate items) = do
     env     <- emptyEnv >>= flip (foldM defineItem) items
-    mainDef <- lookupFn env main
     void $ eval env (FnCall main [])
     where main = Identifier "main"

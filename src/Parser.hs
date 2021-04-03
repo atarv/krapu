@@ -12,7 +12,9 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Parser where
 
-import           Data.Bifunctor                 ( bimap )
+import           Data.Bifunctor                 ( bimap
+                                                , first
+                                                )
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
@@ -86,10 +88,10 @@ operatorTable =
     [ [unary "-" Negate, unary "+" Plus, unary "!" Not]
     , [binary "*" (:*), binary "/" (:/)]
     , [binary "+" (:+), binary "-" (:-)]
-    , [ binary ">"  (:>)  -- Rust disallows comparison operator chaining, but
-      , binary "<"  (:<)  -- to make things simple let's follow C instead
-      , binary ">=" (:>=)
+    , [ binary ">=" (:>=)
       , binary "<=" (:<=)
+      , binary ">"  (:>)  -- Rust disallows comparison operator chaining, but
+      , binary "<"  (:<)  -- to make things simple let's follow C instead
       ]
     , [binary "==" (:==), binary "!=" (:!=)]
     , [binary "&&" (:&&)]
@@ -224,7 +226,12 @@ item = functionDeclaration
 
 -- | Parse a whole crate. Empty crates are not allowed.
 crate :: Parser Crate
-crate = Crate <$> some item <* eof
+crate = spaceConsumer >> Crate <$> some item <* eof
+
+-- | Parse a crate. Parse error is converted to text.
+parseCrate :: String -> Text -> Either Text Crate
+parseCrate src content =
+    first (T.pack . errorBundlePretty) $ parse crate src content
 
 -- | First argument is source file name and second is it's content. @Left@
 -- contains parser error message(s) and @Right@ contains the AST as text
