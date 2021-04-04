@@ -1,0 +1,15 @@
+fn t() {
+    1
+}
+
+fn main() {
+    // Functions can be used before their definition if they occur in the same scope.
+    // I think this is called hoisting, at least in JavaScript terms.
+    let f: I64 = t();
+
+    fn t() {
+        2
+    }
+
+    debug(f); // Should print 2
+}

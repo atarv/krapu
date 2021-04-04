@@ -1,15 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module InterpreterSpec (spec) where
+module InterpreterSpec
+    ( spec
+    )
+where
 
 import           Data.IORef
+import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
 
 import           AST
 import           Interpreter
 
+import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
 
 
@@ -21,15 +26,17 @@ exampleEnv = do
     foo2 <- newIORef $ ResBool True
     Env
         <$> newIORef
-                [ Map.fromList
-                    [(Identifier "foo", foo), (Identifier "bar", bar)]
-                , Map.fromList
-                    [(Identifier "baz", baz), (Identifier "foo", foo2)]
-                ]
+                (NonEmpty.fromList
+                    [ Map.fromList
+                        [(Identifier "foo", foo), (Identifier "bar", bar)]
+                    , Map.fromList
+                        [(Identifier "baz", baz), (Identifier "foo", foo2)]
+                    ]
+                )
         <*> pure exampleFnDefs
 
 exampleFnDefs :: FnDefs
-exampleFnDefs = [Map.fromList [min]]
+exampleFnDefs = Map.fromList [min] :| []
   where
     min =
         ( Identifier "min"
@@ -193,9 +200,15 @@ spec = do
                     eval
                     (FnCall (Identifier "min") [IntLit (-2), IntLit 0])
             fnCall `shouldReturn` ResInt (-2)
-        it "fail with inccorrect number of arguments" $ do
+        it "fails with inccorrect number of arguments" $ do
             let fnCall = fmap snd $ exampleEnv >>= flip
                     eval
                     (FnCall (Identifier "min") [IntLit (-2), IntLit 2, IntLit 3]
                     )
             fnCall `shouldThrow` anyException
+        it "fails if called functions does not exist in current environment"
+            $ do
+                  let fnCallNotFound = fmap snd $ exampleEnv >>= flip
+                          eval
+                          (FnCall (Identifier "föö") [])
+                  fnCallNotFound `shouldThrow` anyException

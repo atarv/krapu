@@ -13,13 +13,18 @@ module Interpreter where
 
 import           Control.Exception              ( bracket )
 import           Control.Monad
+import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
 import           Data.List                      ( intercalate )
+import           Data.List.NonEmpty             ( NonEmpty(..)
+                                                , (<|)
+                                                )
 import           Data.Map.Strict                ( Map )
 
 import           AST
 
+import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
 import qualified Data.Text                     as T
 
@@ -35,18 +40,20 @@ data Result
     deriving (Show, Eq, Ord)
 
 -- | Symbol table holds variables and their values
-type SymTable = [Map Identifier (IORef Result)]
+type SymTable = NonEmpty (Map Identifier (IORef Result))
 
+-- | A single function definition
 data FnDef = FnDef [Identifier] Block
 
-type FnDefs = [Map Identifier FnDef]
+-- | Function definitions
+type FnDefs = NonEmpty (Map Identifier FnDef)
 
 -- | Environment of the interpreted program
 data Env = Env { symTable :: IORef SymTable, fnDefs :: FnDefs }
 
 -- | Creates a blank environment
 emptyEnv :: IO Env
-emptyEnv = Env <$> newIORef [Map.empty] <*> pure [Map.empty]
+emptyEnv = Env <$> newIORef (Map.empty :| []) <*> pure (Map.empty :| [])
 
 -- | @findVarRef e i@ Find reference to value of the variable which identifier 
 -- @i@ refers to (in environment @e@).
@@ -75,9 +82,7 @@ defineVar env@Env { symTable = envRef } idf val = do
     valRef <- newIORef val
     modifyIORef' envRef (addVar valRef)
     pure env
-  where
-    addVar valRef (ctx : ctxs) = Map.insert idf valRef ctx : ctxs
-    addVar valRef []           = [Map.insert idf valRef Map.empty]
+    where addVar valRef (ctx :| ctxs) = Map.insert idf valRef ctx :| ctxs
 
 -- | Assign value to variable
 assignVar :: Env -> Identifier -> Result -> IO Env
@@ -91,15 +96,14 @@ assignVar envRef idf val = do
 
 -- | Add item definition to environment
 defineItem :: Env -> Item -> IO Env
-defineItem Env { fnDefs = [] } = const $ fail "this shouldn't happen"
-defineItem env@Env { fnDefs = (ctx : ctxs) } = \case
+defineItem env@Env { fnDefs = ctx :| ctxs } = \case
     Function identifier params _ body -> do
         -- First check that there isn't already a function with same identifier
         -- in current context. Shadowing functions in outer scopes is allowed.
-        case identifier `Map.lookup` head (fnDefs env) of
+        case identifier `Map.lookup` NonEmpty.head (fnDefs env) of
             Nothing -> do
                 let newFn       = FnDef (fmap fst params) body
-                    updatedDefs = Map.insert identifier newFn ctx : ctxs
+                    updatedDefs = Map.insert identifier newFn ctx :| ctxs
                 pure $ env { fnDefs = updatedDefs }
             Just _ ->
                 let (Identifier idf) = identifier
@@ -114,10 +118,7 @@ lookupFn env identifier =
     case foldr (lookIdentifier identifier) Nothing (fnDefs env) of
         Nothing ->
             let Identifier idf = identifier
-            in  fail
-                    $  "definition for '"
-                    <> T.unpack idf
-                    <> "' could not be found"
+            in  fail $ "'" <> T.unpack idf <> "' is not defined"
         Just def -> pure def
 
 -- | @withinNewScope env a@ Execute given action @a@ in a new scope added to 
@@ -127,13 +128,13 @@ withinNewScope :: Env -> (Env -> IO b) -> IO b
 withinNewScope env = bracket (beginScope env) exitScope
   where
     beginScope env = do
-        modifyIORef' (symTable env) (Map.empty :)
-        pure $ env { fnDefs = Map.empty : fnDefs env }
+        modifyIORef' (symTable env) (Map.empty <|)
+        pure $ env { fnDefs = Map.empty <| fnDefs env }
     exitScope env = do
-        -- Using tail here should be safe since a new scope is always added 
-        -- before exiting
-        modifyIORef' (symTable env) tail
-        pure $ env { fnDefs = tail $ fnDefs env }
+        -- Using @NonEmpty.fromList@ here should be safe since a new scope is 
+        -- always added before exiting
+        modifyIORef' (symTable env) (NonEmpty.fromList . NonEmpty.tail)
+        pure $ env { fnDefs = NonEmpty.fromList . NonEmpty.tail $ fnDefs env }
 
 -- | Print environment starting from the innermost context
 -- TODO: Show function names and parameters
@@ -141,7 +142,7 @@ printEnv :: Env -> IO ()
 printEnv env =
     readIORef (symTable env) >>= traverse showValVarPairs >>= putStr . separate
   where
-    separate        = intercalate "---\n"
+    separate        = intercalate "---\n" . NonEmpty.toList
     showValVarPairs = Map.foldMapWithKey
         (\(Identifier idf) valRef -> do
             val <- readIORef valRef
@@ -316,6 +317,5 @@ eval env = \case
 -- | Run the main program of the crate. Fails if main is not defined.
 runProgram :: Crate -> IO ()
 runProgram (Crate items) = do
-    env     <- emptyEnv >>= flip (foldM defineItem) items
-    void $ eval env (FnCall main [])
-    where main = Identifier "main"
+    env <- emptyEnv >>= flip (foldM defineItem) items
+    void $ eval env (FnCall (Identifier "main") [])

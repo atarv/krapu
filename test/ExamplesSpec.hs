@@ -17,14 +17,15 @@ folder :: String
 folder = "test/examples/"
 
 examplePrograms :: [String]
-examplePrograms = ["factorial.krap"]
+examplePrograms = ["factorial.krap", "function_shadowing.krap"]
 
 -- | Check that parsing the program succeeds
 parseExample :: String -> SpecWith ()
-parseExample program = it program $ do
-    (   T.readFile (folder <> program)
-        >>= \source -> pure $ isRight (parseProgram program source)
-        )
+parseExample program =
+    it program
+        $ (   T.readFile (folder <> program)
+          >>= \source -> pure $ isRight (parseProgram program source)
+          )
         `shouldReturn` True
 
 -- | Check that example program won't crash. Doesn't warrant in any way that the
