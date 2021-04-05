@@ -6,6 +6,7 @@ module InterpreterSpec
     )
 where
 
+import           Control.Monad.State.Strict
 import           Data.IORef
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Test.Hspec
@@ -51,35 +52,38 @@ exampleFnDefs = Map.fromList [min] :| []
             )
         )
 
+usingEnv :: IO Env -> Interpreter b -> IO b
+usingEnv ioEnv interpret = do
+    env <- ioEnv
+    evalStateT interpret env
+
+usingExampleEnv :: Interpreter b -> IO b
+usingExampleEnv = usingEnv exampleEnv
+
 spec :: Spec
 spec = do
     describe "Arithmetic operations" $ do
-        let env = emptyEnv
         prop "are handled" $ \(a, b, c, d, e) ->
-            let testCase = eval
-                    env
+            let testCase = flip evalStateT emptyEnv $ eval
                     (  (IntLit a :+ (IntLit b :/ Negate (IntLit c)))
                     :- (IntLit d :* Plus (IntLit e))
                     )
             in  if (c :: Integer) == 0 -- Avoid division by zero
                     then True `shouldBe` True -- FIXME: check for ArithException
-                    else do
-                        (_, result) <- testCase
-                        result `shouldBe` ResInt (a + b `div` (-c) - d * e)
+                    else testCase
+                        `shouldReturn` ResInt (a + b `div` (-c) - d * e)
 
     describe "If expressions" $ do
         -- env <- runIO emptyEnv
         prop "condition is handled correctly" $ \(cond, conseq, alt) -> do
-            (_, result) <- eval
-                emptyEnv
+            result <- flip evalStateT emptyEnv $ eval
                 (IfExpr [(BoolLit cond, Block [] (BoolLit conseq))]
                         (Just (Block [] (BoolLit alt)))
                 )
             result `shouldBe` ResBool (if cond then conseq else alt)
         prop "else if branches are handled"
             $ \(condIf, condElseIf, conseqIf, conseqElseIf, alt) -> do
-                  (_, result) <- eval
-                      emptyEnv
+                  result <- flip evalStateT emptyEnv $ eval
                       (IfExpr
                           [ (BoolLit condIf, Block [] (BoolLit conseqIf))
                           , ( BoolLit condElseIf
@@ -99,14 +103,13 @@ spec = do
 
     describe "Let statement" $ do
         let testCase testEnv = do
-                env  <- testEnv
-                env' <- execStatement
-                    env
-                    (StatementLet (Identifier "foo")
-                                  (Type "I64")
-                                  (IntLit 22 :+ IntLit 20)
-                    )
-                lookupVar env' (Identifier "foo")
+                usingEnv testEnv $ do
+                    execStatement
+                        (StatementLet (Identifier "foo")
+                                      (Type "I64")
+                                      (IntLit 22 :+ IntLit 20)
+                        )
+                    lookupVar (Identifier "foo")
         it "should add a variable definition to environment"
             $              testCase (pure emptyEnv)
             `shouldReturn` ResInt 42
@@ -115,32 +118,27 @@ spec = do
             `shouldReturn` ResInt 42
 
     describe "Variable lookup" $ do
-        (foo, baz) <- runIO $ do
-            env         <- exampleEnv
-            (env', foo) <- eval env (Var $ Identifier "foo")
-            (_   , baz) <- eval env' (Var $ Identifier "baz")
-            pure (foo, baz)
+        (foo, baz) <- runIO $ usingExampleEnv $ do
+            (,) <$> eval (Var $ Identifier "foo") <*> eval
+                (Var $ Identifier "baz")
 
         it "works for the simplest case (current context)" $ do
             foo `shouldBe` ResInt 1
         it "looks upwards the context hierarchy" $ do
             baz `shouldBe` ResBool False
         it "fails if variable does not exist"
-            $ let noVar = do
-                      env <- exampleEnv
-                      eval env (Var $ Identifier "doesNotExist")
+            $ let noVar =
+                      usingExampleEnv $ eval (Var $ Identifier "doesNotExist")
               in  noVar `shouldThrow` anyException
         it "looks in outer context(s) if variable is not found on current" $ do
-            let testOuterContext = fmap snd $ exampleEnv >>= flip
-                    evalBlock
+            let testOuterContext = usingExampleEnv $ evalBlock
                     (Block
                         [StatementLet (Identifier "x") (Type "I64") (IntLit 2)]
                         (ExprBlock $ Block [] (Var $ Identifier "x"))
                     )
             testOuterContext `shouldReturn` ResInt 2
         it "variables defined in exited scopes shouldn't be available" $ do
-            let accessInnerScope = fmap snd $ exampleEnv >>= flip
-                    evalBlock
+            let accessInnerScope = usingExampleEnv $ evalBlock
                     (Block
                         [ StatementExpr $ ExprBlock $ Block
                               [ StatementLet (Identifier "x")
@@ -155,16 +153,14 @@ spec = do
 
     describe "Assignment expression" $ do
         it "sets variable's value" $ do
-            let assignment = fmap snd $ exampleEnv >>= flip
-                    evalBlock
+            let assignment = usingExampleEnv $ evalBlock
                     (Block
                         [StatementExpr (Var (Identifier "foo") := IntLit 75)]
                         (Var (Identifier "foo"))
                     )
             assignment `shouldReturn` ResInt 75
         it "can be chained and it's right associative" $ do
-            let chainedAssignment = fmap snd $ exampleEnv >>= flip
-                    evalBlock
+            let chainedAssignment = usingExampleEnv $ evalBlock
                     (Block
                         [ StatementExpr
                           $  Var (Identifier "bar")
@@ -176,36 +172,39 @@ spec = do
 
     describe "While loop" $ do
         it "executes loop body until loop predicate is false" $ do
-            let envAfterLoop = fmap fst $ exampleEnv >>= flip
+            let
+                lookupFoo = usingExampleEnv $ do
                     eval
-                    (While
-                        (Var (Identifier "foo") :< IntLit 10)
-                        (Block
-                            [ StatementExpr
-                              $  Var (Identifier "foo")
-                              := (Var (Identifier "foo") :+ IntLit 4)
-                            ]
-                            Unit
+                        (While
+                            (Var (Identifier "foo") :< IntLit 10)
+                            (Block
+                                [ StatementExpr
+                                  $  Var (Identifier "foo")
+                                  := (Var (Identifier "foo") :+ IntLit 4)
+                                ]
+                                Unit
+                            )
                         )
-                    )
-                lookupFoo = envAfterLoop >>= flip lookupVar (Identifier "foo")
+                    lookupVar (Identifier "foo")
             lookupFoo `shouldReturn` ResInt 13
 
     describe "Function calls" $ do
         it "succeed when supplied correct number of arguments" $ do
-            let fnCall = fmap snd $ exampleEnv >>= flip
-                    eval
-                    (FnCall (Identifier "min") [IntLit (-2), IntLit 0])
+            let
+                fnCall =
+                    usingExampleEnv $ eval
+                        (FnCall (Identifier "min") [IntLit (-2), IntLit 0])
             fnCall `shouldReturn` ResInt (-2)
-        it "fails with inccorrect number of arguments" $ do
-            let fnCall = fmap snd $ exampleEnv >>= flip
-                    eval
-                    (FnCall (Identifier "min") [IntLit (-2), IntLit 2, IntLit 3]
-                    )
-            fnCall `shouldThrow` anyException
+        it "fails with inccorrect number of arguments"
+            $ let
+                  fnCall =
+                      usingExampleEnv
+                          $ eval
+                                (FnCall (Identifier "min")
+                                        [IntLit (-2), IntLit 2, IntLit 3]
+                                )
+              in  fnCall `shouldThrow` anyException
         it "fails if called functions does not exist in current environment"
-            $ do
-                  let fnCallNotFound = fmap snd $ exampleEnv >>= flip
-                          eval
-                          (FnCall (Identifier "föö") [])
-                  fnCallNotFound `shouldThrow` anyException
+            $ let fnCallNotFound =
+                      usingExampleEnv $ eval (FnCall (Identifier "föö") [])
+              in  fnCallNotFound `shouldThrow` anyException

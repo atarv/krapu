@@ -39,6 +39,7 @@ library
     , parser-combinators
     , text
     , containers
+    , mtl
   default-language: Haskell2010
 
 executable krapu-exe
@@ -79,4 +80,5 @@ test-suite krapu-test
     , text
     , QuickCheck
     , containers
+    , mtl
   default-language: Haskell2010
