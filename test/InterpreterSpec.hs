@@ -24,16 +24,13 @@ exampleEnv = do
     bar  <- newIORef $ ResInt 42
     baz  <- newIORef $ ResBool False
     foo2 <- newIORef $ ResBool True
-    Env
-        <$> newIORef
-                (NonEmpty.fromList
-                    [ Map.fromList
-                        [(Identifier "foo", foo), (Identifier "bar", bar)]
-                    , Map.fromList
-                        [(Identifier "baz", baz), (Identifier "foo", foo2)]
-                    ]
-                )
-        <*> pure exampleFnDefs
+    pure $ Env
+        (NonEmpty.fromList
+            [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
+            , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
+            ]
+        )
+        exampleFnDefs
 
 exampleFnDefs :: FnDefs
 exampleFnDefs = Map.fromList [min] :| []
@@ -57,7 +54,7 @@ exampleFnDefs = Map.fromList [min] :| []
 spec :: Spec
 spec = do
     describe "Arithmetic operations" $ do
-        env <- runIO emptyEnv
+        let env = emptyEnv
         prop "are handled" $ \(a, b, c, d, e) ->
             let testCase = eval
                     env
@@ -71,10 +68,10 @@ spec = do
                         result `shouldBe` ResInt (a + b `div` (-c) - d * e)
 
     describe "If expressions" $ do
-        env <- runIO emptyEnv
+        -- env <- runIO emptyEnv
         prop "condition is handled correctly" $ \(cond, conseq, alt) -> do
             (_, result) <- eval
-                env
+                emptyEnv
                 (IfExpr [(BoolLit cond, Block [] (BoolLit conseq))]
                         (Just (Block [] (BoolLit alt)))
                 )
@@ -82,7 +79,7 @@ spec = do
         prop "else if branches are handled"
             $ \(condIf, condElseIf, conseqIf, conseqElseIf, alt) -> do
                   (_, result) <- eval
-                      env
+                      emptyEnv
                       (IfExpr
                           [ (BoolLit condIf, Block [] (BoolLit conseqIf))
                           , ( BoolLit condElseIf
@@ -111,7 +108,7 @@ spec = do
                     )
                 lookupVar env' (Identifier "foo")
         it "should add a variable definition to environment"
-            $              testCase emptyEnv
+            $              testCase (pure emptyEnv)
             `shouldReturn` ResInt 42
         it "should allow shadowing an existing variable"
             $              testCase exampleEnv

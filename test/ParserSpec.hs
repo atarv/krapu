@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module ParserSpec (spec) where
+module ParserSpec
+    ( spec
+    )
+where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -96,11 +99,19 @@ spec = do
                               Nothing
 
     describe "block expressions" $ do
-        it "can be nested"
+        it "can be nested and used as a return value"
             $             parse blockExpr "" "{ ; { 1 } }"
             `shouldParse` ExprBlock
                               (Block [StatementEmpty]
                                      (ExprBlock (Block [] (IntLit 1)))
+                              )
+
+    describe "block statements" $ do
+        it "end in semicolon to separate them from block expressions"
+            $             parse statement "" "{ ; { } };"
+            `shouldParse` StatementExpr
+                              (ExprBlock $ Block [StatementEmpty]
+                                                 (ExprBlock $ Block [] Unit)
                               )
 
     describe "let statements" $ do
@@ -109,3 +120,31 @@ spec = do
             `shouldParse` StatementLet (Identifier "xyzzy")
                                        (Type "I64")
                                        (IntLit 4321)
+
+    describe "function declarations" $ do
+        it "can contain more function definitions"
+            $             parse item "" "fn f() { fn g() { 2 } g() }"
+            `shouldParse` Function
+                              (Identifier "f")
+                              []
+                              (Type "Unit")
+                              (Block
+                                  [ StatementItem $ Function
+                                        (Identifier "g")
+                                        []
+                                        (Type "Unit")
+                                        (Block [] (IntLit 2))
+                                  ]
+                                  (FnCall (Identifier "g") [])
+                              )
+
+    describe "function calls" $ do
+        it "can have empty param lists"
+            $             parse functionCall "" "f()"
+            `shouldParse` FnCall (Identifier "f") []
+        it "omitting argument list causes parser to fail"
+            $              parse functionCall ""
+            `shouldFailOn` "f"
+        it "trailing commas are not allowed on argument list"
+            $              parse functionCall ""
+            `shouldFailOn` "f(1,2,)"

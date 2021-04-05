@@ -13,6 +13,7 @@ module Interpreter where
 
 import           Control.Exception              ( bracket )
 import           Control.Monad
+import           Data.Bifunctor                 ( first )
 import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
@@ -49,17 +50,16 @@ data FnDef = FnDef [Identifier] Block
 type FnDefs = NonEmpty (Map Identifier FnDef)
 
 -- | Environment of the interpreted program
-data Env = Env { symTable :: IORef SymTable, fnDefs :: FnDefs }
+data Env = Env { symTable :: SymTable, fnDefs :: FnDefs }
 
 -- | Creates a blank environment
-emptyEnv :: IO Env
-emptyEnv = Env <$> newIORef (Map.empty :| []) <*> pure (Map.empty :| [])
+emptyEnv :: Env
+emptyEnv = Env (Map.empty :| []) (Map.empty :| [])
 
 -- | @findVarRef e i@ Find reference to value of the variable which identifier 
 -- @i@ refers to (in environment @e@).
-findVarRef :: Env -> Identifier -> IO (Maybe (IORef Result))
-findVarRef Env { symTable = envRef } idf =
-    readIORef envRef <&> foldr (lookIdentifier idf) Nothing
+findVarRef :: Env -> Identifier -> Maybe (IORef Result)
+findVarRef Env { symTable = env } idf = foldr (lookIdentifier idf) Nothing env
 
 lookIdentifier :: Ord k => k -> Map k a -> Maybe a -> Maybe a
 lookIdentifier idf vars found = case idf `Map.lookup` vars of
@@ -68,8 +68,8 @@ lookIdentifier idf vars found = case idf `Map.lookup` vars of
 
 -- | Lookup a variable's value. Fails if variable is not defined yet.
 lookupVar :: Env -> Identifier -> IO Result
-lookupVar envRef idf = do
-    findVarRef envRef idf >>= \case
+lookupVar env idf = do
+    case findVarRef env idf of
         Just valRef -> readIORef valRef
         Nothing ->
             let (Identifier var) = idf
@@ -78,21 +78,21 @@ lookupVar envRef idf = do
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.
 defineVar :: Env -> Identifier -> Result -> IO Env
-defineVar env@Env { symTable = envRef } idf val = do
+defineVar env@Env { symTable = syms } idf val = do
     valRef <- newIORef val
-    modifyIORef' envRef (addVar valRef)
-    pure env
+    pure $ env { symTable = addVar valRef syms }
     where addVar valRef (ctx :| ctxs) = Map.insert idf valRef ctx :| ctxs
 
 -- | Assign value to variable
 assignVar :: Env -> Identifier -> Result -> IO Env
-assignVar envRef idf val = do
-    findVarRef envRef idf >>= \case
-        Just valRef -> modifyIORef' valRef (const val)
+assignVar env idf val = do
+    case findVarRef env idf of
+        Just valRef -> do
+            modifyIORef' valRef (const val)
+            pure env
         Nothing ->
             let (Identifier var) = idf
             in  fail $ "Variable '" <> T.unpack var <> "' not found"
-    pure envRef
 
 -- | Add item definition to environment
 defineItem :: Env -> Item -> IO Env
@@ -124,23 +124,28 @@ lookupFn env identifier =
 -- | @withinNewScope env a@ Execute given action @a@ in a new scope added to 
 -- the environment @env@. Once the action is complete, scope is exited 
 -- automatically.
-withinNewScope :: Env -> (Env -> IO b) -> IO b
-withinNewScope env = bracket (beginScope env) exitScope
+withinNewScope :: Env -> (Env -> IO (Env, a)) -> IO (Env, a)
+withinNewScope env action = do
+    action (beginScope env) <&> first exitScope
   where
-    beginScope env = do
-        modifyIORef' (symTable env) (Map.empty <|)
-        pure $ env { fnDefs = Map.empty <| fnDefs env }
-    exitScope env = do
-        -- Using @NonEmpty.fromList@ here should be safe since a new scope is 
-        -- always added before exiting
-        modifyIORef' (symTable env) (NonEmpty.fromList . NonEmpty.tail)
-        pure $ env { fnDefs = NonEmpty.fromList . NonEmpty.tail $ fnDefs env }
+    beginScope env = env { fnDefs   = Map.empty <| fnDefs env
+                         , symTable = Map.empty <| symTable env
+                         }
+    exitScope env = env { fnDefs   = removeScope $ fnDefs env
+                        , symTable = removeScope $ symTable env
+                        }
+    -- Using NonEmpty.fromList here should be safe since a new scope is 
+    -- always added before exiting
+    removeScope = NonEmpty.fromList . NonEmpty.tail
 
 -- | Print environment starting from the innermost context
--- TODO: Show function names and parameters
 printEnv :: Env -> IO ()
 printEnv env =
-    readIORef (symTable env) >>= traverse showValVarPairs >>= putStr . separate
+    let contexts     = NonEmpty.zip (symTable env) (fnDefs env)
+        showContexts = traverse
+            (\(syms, defs) -> (<> showFnDefs defs) <$> showValVarPairs syms)
+            contexts
+    in  showContexts >>= putStr . separate
   where
     separate        = intercalate "---\n" . NonEmpty.toList
     showValVarPairs = Map.foldMapWithKey
@@ -148,6 +153,11 @@ printEnv env =
             val <- readIORef valRef
             return $ T.unpack idf <> " = " <> show val <> "\n"
         )
+    showFnDefs = Map.foldMapWithKey
+        (\(Identifier idf) (FnDef params _) ->
+            mconcat ["fn ", T.unpack idf, "(", commaSep params, ")\n"]
+        )
+    commaSep = intercalate ", " . fmap (\(Identifier idf) -> T.unpack idf)
 
 -- | Blocks evaluate to their outer expression's result.
 evalBlock :: Env -> Block -> IO (Env, Result)
@@ -211,17 +221,17 @@ eval env = \case
         (_   , val      ) -> errUnexpectedType "bool" val
 
     -- Comparison
-    lhs       :<  rhs -> comparisonOp env (<) lhs rhs
-    lhs       :>  rhs -> comparisonOp env (>) lhs rhs
-    lhs       :<= rhs -> comparisonOp env (<=) lhs rhs
-    lhs       :>= rhs -> comparisonOp env (>=) lhs rhs
+    lhs     :<  rhs -> comparisonOp env (<) lhs rhs
+    lhs     :>  rhs -> comparisonOp env (>) lhs rhs
+    lhs     :<= rhs -> comparisonOp env (<=) lhs rhs
+    lhs     :>= rhs -> comparisonOp env (>=) lhs rhs
 
     -- Equality
-    lhs       :== rhs -> equalityOp env (==) lhs rhs
-    lhs       :!= rhs -> equalityOp env (/=) lhs rhs
+    lhs     :== rhs -> equalityOp env (==) lhs rhs
+    lhs     :!= rhs -> equalityOp env (/=) lhs rhs
 
     -- Assignment
-    (Var idf) :=  rhs -> eval env rhs >>= \case
+    Var idf :=  rhs -> eval env rhs >>= \case
         (env', res) -> (, res) <$> assignVar env' idf res
     err := _ -> fail $ "Cannot assign to expression " <> show err
 
@@ -232,6 +242,7 @@ eval env = \case
         (_, val) -> errUnexpectedType "bool" val
     IfExpr [] (Just alt)             -> evalBlock env alt
     IfExpr [] Nothing                -> pure (env, ResUnit)
+
     ExprBlock block                  -> evalBlock env block
     While condition body             -> evalWhile env condition body
     Loop body                        -> evalWhile env (BoolLit True) body
@@ -311,11 +322,11 @@ eval env = \case
         -- TODO: function params get their own scope which is probably 
         -- unnecessary and causes (probably very slight) overhead, but shouldn't
         -- change the semantics.
-        withinNewScope env $ \env -> do
-            foldM (uncurry . defineVar) env argDefs >>= flip evalBlock body
+        withinNewScope env $ \env' -> do
+            foldM (uncurry . defineVar) env' argDefs >>= flip evalBlock body
 
 -- | Run the main program of the crate. Fails if main is not defined.
 runProgram :: Crate -> IO ()
 runProgram (Crate items) = do
-    env <- emptyEnv >>= flip (foldM defineItem) items
+    env <- foldM defineItem emptyEnv items
     void $ eval env (FnCall (Identifier "main") [])
