@@ -17,7 +17,8 @@ folder :: String
 folder = "test/examples/"
 
 examplePrograms :: [String]
-examplePrograms = ["factorial.krap", "function_shadowing.krap", "scope.krap"]
+examplePrograms =
+    ["factorial.krap", "function_shadowing.krap", "scope.krap", "hello.krap"]
 
 -- | Check that parsing the program succeeds
 parseExample :: String -> SpecWith ()

@@ -1,10 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module ParserSpec
-    ( spec
-    )
-where
+module ParserSpec (spec) where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -97,6 +94,19 @@ spec = do
                                 )
                               ]
                               Nothing
+        it "comments are allowed between and after else and if keywords" $ do
+            let
+                withComments
+                    = "if false /* always */\n\
+                    \{ 1 }\n\
+                    \/**/ else /* comment */ if /* condition */ 1 < 2\n\
+                    \{ 2 }"
+            parse ifExpr "" withComments
+                `shouldParse` IfExpr
+                                  [ (BoolLit False       , Block [] (IntLit 1))
+                                  , (IntLit 1 :< IntLit 2, Block [] (IntLit 2))
+                                  ]
+                                  Nothing
 
     describe "block expressions" $ do
         it "can be nested and used as a return value"

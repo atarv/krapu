@@ -57,7 +57,7 @@ betweenBraces = between (symbol "{") (symbol "}")
 
 -- | Reserved words of the language. These cannot be used as identifiers.
 reservedWords :: Set Text
-reservedWords = Set.fromList ["else", "fn", "if", "let", "while"]
+reservedWords = Set.fromList ["else", "fn", "if", "let", "while", "break"]
 
 booleanLiteral :: Parser Expr
 booleanLiteral =
@@ -108,7 +108,15 @@ operatorTable =
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
-literal = integerLiteral <|> try booleanLiteral
+literal = integerLiteral <|> try booleanLiteral <|> unitLiteral <|> strLiteral
+
+-- | Parse literal unit, @()@
+unitLiteral :: Parser Expr
+unitLiteral = Unit <$ symbol "()"
+
+-- | Parse literal string. Escaped characters are supported.
+strLiteral :: Parser Expr
+strLiteral = Str . T.pack <$ char '"' <*> Lex.charLiteral `manyTill` char '"'
 
 -- | Parse a variable access
 variable :: Parser Expr
@@ -132,10 +140,12 @@ expression = Expr.makeExprParser term operatorTable <?> "expression"
 -- | Parse an if-else-expression, else is optional.
 ifExpr :: Parser Expr
 ifExpr = do
-    IfExpr <$> ((:) <$> ifBranch <*> many elseIfBranch) <*> optional elseBranch
+    IfExpr
+        <$> ((:) <$> ifBranch <*> many (try elseIfBranch))
+        <*> optional elseBranch
   where
     ifBranch     = (,) <$ symbol "if" <*> expression <*> block
-    elseIfBranch = (,) <$ symbol "else if" <*> expression <*> block
+    elseIfBranch = (,) <$ symbol "else" <* symbol "if" <*> expression <*> block
     elseBranch   = symbol "else" >> block
 
 blockExpr :: Parser Expr
@@ -153,9 +163,9 @@ breakExpr = Break <$ symbol "break" <*> option Unit expression
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
 type_ = lexeme . label "type" $ do
-    initial <- upperChar
-    rest    <- many alphaNumChar
-    pure . Type $ T.singleton initial <> T.pack rest
+    initial <- T.singleton <$> upperChar
+    rest    <- T.pack <$> many alphaNumChar
+    pure . Type $ initial <> rest
 
 -- | Parse an identifier of other language constructs than types
 identifier :: Parser Identifier
@@ -169,10 +179,7 @@ identifier = lexeme . label "identifier" $ do
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter
-functionParam = do
-    name <- identifier
-    _    <- symbol ":"
-    (,) name <$> type_
+functionParam = (,) <$> identifier <* symbol ":" <*> type_
 
 -- | Parse a statement
 statement :: Parser Statement
@@ -195,9 +202,7 @@ statement =
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.
 block :: Parser Block
-block = betweenBraces $ do
-    stmts <- many statement
-    Block stmts <$> option Unit expression
+block = betweenBraces $ Block <$> many statement <*> option Unit expression
 
 -- | Parse a function call
 functionCall :: Parser Expr
@@ -226,7 +231,7 @@ item = functionDeclaration
 
 -- | Parse a whole crate. Empty crates are not allowed.
 crate :: Parser Crate
-crate = spaceConsumer >> Crate <$> some item <* eof
+crate = between spaceConsumer eof $ Crate <$> some item
 
 -- | Parse a crate. Parse error is converted to text.
 parseCrate :: String -> Text -> Either Text Crate

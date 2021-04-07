@@ -19,12 +19,14 @@ import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
 import           Data.Map.Strict                ( Map )
+import           Data.Text                      ( Text )
 
 import           AST
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
 import qualified Data.Text                     as T
+import qualified Data.Text.IO                  as T
 
 
 -- Took some inspiration from one of the course's example projects: vt-2016
@@ -35,6 +37,7 @@ data Result
     = ResUnit
     | ResInt Integer
     | ResBool Bool
+    | ResStr Text
     deriving (Show, Eq, Ord)
 
 -- | Symbol table holds variables and their values
@@ -51,6 +54,8 @@ data Env = Env { symTable :: SymTable, fnDefs :: FnDefs }
 
 type Interpreter a = StateT Env IO a
 
+-- * Environment handling
+
 -- | Creates a blank environment
 emptyEnv :: Env
 emptyEnv = Env (Map.empty :| []) (Map.empty :| [])
@@ -61,7 +66,7 @@ findVarRef :: Identifier -> Interpreter (Maybe (IORef Result))
 findVarRef idf = gets $ foldr (lookIdentifier idf) Nothing . symTable
 
 lookIdentifier :: Ord k => k -> Map k a -> Maybe a -> Maybe a
-lookIdentifier idf vars found = case idf `Map.lookup` vars of
+lookIdentifier idf vars found = case Map.lookup idf vars of
     Nothing -> found
     valRef  -> valRef
 
@@ -96,25 +101,21 @@ assignVar idf val = do
 
 -- | Add item definition to environment
 defineItem :: Item -> Interpreter ()
--- defineItem env@Env { fnDefs = ctx :| ctxs } = \case
 defineItem = \case
     Function identifier params _ body -> do
         -- First check that there isn't already a function with same identifier
         -- in current context. Shadowing functions in outer scopes is allowed.
         env <- get
-        case identifier `Map.lookup` NonEmpty.head (fnDefs env) of
-            Nothing -> do
-                env <- get
-                let (ctx :| ctxs) = fnDefs env
-                    newFn         = FnDef (fmap fst params) body
-                    updatedDefs   = Map.insert identifier newFn ctx :| ctxs
-                put $ env { fnDefs = updatedDefs }
-            Just _ ->
-                let (Identifier idf) = identifier
-                in  fail
-                        $  "function '"
-                        <> T.unpack idf
-                        <> "' is already defined"
+        maybe addDefinition (errAlreadyDefined identifier)
+            $ Map.lookup identifier (NonEmpty.head (fnDefs env))
+      where
+        addDefinition = modify' $ \env ->
+            let (ctx :| ctxs) = fnDefs env
+                newFnDef      = FnDef (fmap fst params) body
+                updatedDefs   = Map.insert identifier newFnDef ctx :| ctxs
+            in  env { fnDefs = updatedDefs }
+        errAlreadyDefined (Identifier idf) _ =
+            fail $ "function '" <> T.unpack idf <> "' is already defined"
 
 -- | Lookup function definition from environment
 lookupFn :: Identifier -> Interpreter FnDef
@@ -145,7 +146,7 @@ withinNewScope action = modify' beginScope >> action <* modify' exitScope
 -- | Print environment starting from the innermost context
 printEnv :: Interpreter ()
 printEnv = do
-    contexts <- NonEmpty.zip <$> gets symTable <*> gets fnDefs
+    contexts <- liftM2 NonEmpty.zip (gets symTable) (gets fnDefs)
     let showContexts = traverse
             (\(syms, defs) -> (<> showFnDefs defs) <$> showValVarPairs syms)
             contexts
@@ -159,9 +160,11 @@ printEnv = do
         )
     showFnDefs = Map.foldMapWithKey
         (\(Identifier idf) (FnDef params _) ->
-            mconcat ["fn ", T.unpack idf, "(", commaSep params, ")\n"]
+            T.unpack $ mconcat ["fn ", idf, "(", commaSep params, ")\n"]
         )
-    commaSep = intercalate ", " . fmap (\(Identifier idf) -> T.unpack idf)
+    commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
+
+-- * Interpreting
 
 -- | Blocks evaluate to their outer expression's result.
 evalBlock :: Block -> Interpreter Result
@@ -177,7 +180,7 @@ execStatement :: Statement -> Interpreter ()
 execStatement = \case
     StatementEmpty              -> pure ()
     StatementExpr expr          -> void $ eval expr
-    -- Items should be added to environment before executing
+    -- Items should be added to environment using 'addItem' before executing
     StatementItem _             -> pure ()
     StatementLet idf _type expr -> eval expr >>= defineVar idf
 
@@ -194,6 +197,7 @@ eval = \case
     Unit        -> pure ResUnit
     IntLit  i   -> pure $ ResInt i
     BoolLit b   -> pure $ ResBool b
+    Str     str -> pure $ ResStr str
 
     -- Variables
     Var     idf -> lookupVar idf
@@ -210,7 +214,7 @@ eval = \case
         ResInt i -> pure $ ResInt i
         val      -> errUnexpectedType "integer" val
 
---     -- Boolean
+    -- Boolean
     lhs :&& rhs -> binaryBoolOp (&&) lhs rhs
     lhs :|| rhs -> binaryBoolOp (||) lhs rhs
     Not expr    -> eval expr >>= \case
@@ -227,11 +231,11 @@ eval = \case
     lhs     :==                        rhs -> equalityOp (==) lhs rhs
     lhs     :!=                        rhs -> equalityOp (/=) lhs rhs
 
-    -- Variables
+    -- Variables and assignment
     Var idf :=                         rhs -> eval rhs >>= assignVar idf
     err := _ -> fail $ "Cannot assign to expression " <> show err
 
---     -- Expressions with blocks
+    -- Expressions with blocks
     IfExpr  ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
         ResBool b -> if b then evalBlock conseq else eval $ IfExpr elseIfs alt
         val       -> errUnexpectedType "bool" val
@@ -242,19 +246,28 @@ eval = \case
     While condition body             -> evalWhile condition body
     Loop body                        -> evalWhile (BoolLit True) body
 
---     -- Misc
+    -- Function calls and primitive functions
     FnCall (Identifier "debug") args -> do
-        evaledArgs <- evalArgs args
+        evaledArgs <- traverse eval args
         liftIO $ mapM_ print evaledArgs
         pure ResUnit
-    FnCall (Identifier "debug_env") [] -> do
+    FnCall (Identifier "debug_env") args -> do
+        unless (null args) $ void $ errWrongArgumentCount
+            (Identifier "debug_env")
+            0
+            (length args)
         printEnv
         pure ResUnit
-    FnCall fnName args -> do
-        fnDef <- lookupFn fnName
-        evalArgs args >>= evalFnCall fnDef
+    FnCall (Identifier "println") args -> case args of
+        [Str str] -> do
+            liftIO $ T.putStrLn str
+            pure ResUnit
+        [wrongArg] -> errUnexpectedType "str" wrongArg
+        _          -> errWrongArgumentCount (Identifier "print") 1 (length args)
+    FnCall fnName args -> evalFnCall fnName args
 
-    Break _expr -> fail "break not implemented"
+    -- Misc
+    Break _expr        -> fail "break not implemented"
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
         (ResInt l, ResInt r) -> pure $ ResInt (l `op` r)
@@ -275,6 +288,17 @@ eval = \case
     errUnexpectedType expected value =
         fail $ concat
             ["Unexpected type: expected ", expected, ", got ", show value]
+
+    errWrongArgumentCount :: Identifier -> Int -> Int -> Interpreter Result
+    errWrongArgumentCount (Identifier fnName) expected got = fail $ mconcat
+        [ "Function '"
+        , T.unpack fnName
+        , "' expected "
+        , show expected
+        , " arguments, got "
+        , show got
+        ]
+
     -- Evaluate two expressions to a pair so they can be pattern matched easily
     evalToPair :: Expr -> Expr -> Interpreter (Result, Result)
     evalToPair a b = (,) <$> eval a <*> eval b
@@ -287,25 +311,18 @@ eval = \case
                 else pure ResUnit
             err ->
                 fail
-                    $  "Loop predicate must evaluate to boolean value, got"
+                    $  "Loop predicate must evaluate to boolean value, got "
                     <> show err
 
-    evalArgs :: [Expr] -> Interpreter [Result]
-    evalArgs args = traverse eval args
-
-    evalFnCall :: FnDef -> [Result] -> Interpreter Result
-    evalFnCall (FnDef params body) args = do
+    evalFnCall :: Identifier -> [Expr] -> Interpreter Result
+    evalFnCall fnName args = do
+        (FnDef params body) <- lookupFn fnName
+        evaledArgs          <- traverse eval args
         let paramCount = length params
-            argCount   = length args
-            errMsg =
-                mconcat
-                    [ "Expected "
-                    , show paramCount
-                    , " arguments, got "
-                    , show argCount
-                    ]
-        when (paramCount /= argCount) $ fail errMsg
-        let argDefs = zip params args
+            argCount   = length evaledArgs
+            argDefs    = zip params evaledArgs
+        when (paramCount /= argCount)
+            $ void (errWrongArgumentCount fnName paramCount argCount)
         -- TODO: function params get their own scope which is probably 
         -- unnecessary and causes (probably very slight) overhead, but shouldn't
         -- change the semantics.

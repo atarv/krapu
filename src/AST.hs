@@ -52,6 +52,7 @@ data Expr
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
+    | Str Text
     -- Variables
     | Var Identifier
     -- Arithmetic
