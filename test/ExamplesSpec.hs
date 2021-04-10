@@ -2,6 +2,7 @@ module ExamplesSpec where
 
 import           Control.Monad
 import           Data.Either
+import           System.Directory
 import           System.IO
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
@@ -13,18 +14,14 @@ import           Parser
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
 
-folder :: String
-folder = "test/examples/"
-
-examplePrograms :: [String]
-examplePrograms =
-    ["factorial.krap", "function_shadowing.krap", "scope.krap", "hello.krap"]
+testDir :: String
+testDir = "test/examples/"
 
 -- | Check that parsing the program succeeds
 parseExample :: String -> SpecWith ()
 parseExample program =
     it program
-        $ (   T.readFile (folder <> program)
+        $ (   T.readFile (testDir <> program)
           >>= \source -> pure $ isRight (parseProgram program source)
           )
         `shouldReturn` True
@@ -34,7 +31,7 @@ parseExample program =
 runExample :: String -> SpecWith ()
 runExample program = it program $ do
     let run = do
-            source <- T.readFile (folder <> program)
+            source <- T.readFile (testDir <> program)
             case parseCrate program source of
                 Left  err   -> fail $ T.unpack err
                 Right crate -> runProgram crate
@@ -42,6 +39,7 @@ runExample program = it program $ do
 
 spec :: Spec
 spec = do
+    examplePrograms <- runIO $ listDirectory testDir
     describe "Parsing example programs" $ do
         forM_ examplePrograms parseExample
     describe "Running example programs" $ do

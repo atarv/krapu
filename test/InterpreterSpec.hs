@@ -17,6 +17,7 @@ import           Interpreter
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
+import qualified Data.Text                     as T
 
 
 exampleEnv :: IO Env
@@ -208,3 +209,21 @@ spec = do
             $ let fnCallNotFound =
                       usingExampleEnv $ eval (FnCall (Identifier "föö") [])
               in  fnCallNotFound `shouldThrow` anyException
+
+    describe "Primitive functions" $ do
+        prop "str_to_i64(i64_to_str(x)) == x" $ \x ->
+            let
+                idempotent = usingEnv (pure emptyEnv) $ eval
+                    (FnCall (Identifier "str_to_i64")
+                            [FnCall (Identifier "i64_to_str") [IntLit x]]
+                    )
+            in  idempotent `shouldReturn` ResInt x
+        prop "i64_to_str(str_to_i64(x)) == x" $ \x ->
+            let idempotent = usingEnv (pure emptyEnv) $ eval
+                    (FnCall
+                        (Identifier "i64_to_str")
+                        [ FnCall (Identifier "str_to_i64")
+                                 [Str (T.pack $ show (x :: Integer))]
+                        ]
+                    )
+            in  idempotent `shouldReturn` ResStr (T.pack $ show x)

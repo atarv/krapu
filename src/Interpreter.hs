@@ -54,6 +54,14 @@ data Env = Env { symTable :: SymTable, fnDefs :: FnDefs }
 
 type Interpreter a = StateT Env IO a
 
+-- | Convert a result value to text in format the user should see it.
+display :: Result -> Text
+display = \case
+    ResUnit     -> "()"
+    ResInt  i   -> T.pack $ show i
+    ResBool b   -> T.pack $ show b
+    ResStr  str -> "\"" <> str <> "\""
+
 -- * Environment handling
 
 -- | Creates a blank environment
@@ -258,12 +266,22 @@ eval = \case
             (length args)
         printEnv
         pure ResUnit
-    FnCall (Identifier "println") args -> case args of
-        [Str str] -> do
+    FnCall (Identifier "println") args -> traverse eval args >>= \case
+        [ResStr str] -> do
             liftIO $ T.putStrLn str
             pure ResUnit
         [wrongArg] -> errUnexpectedType "str" wrongArg
         _          -> errWrongArgumentCount (Identifier "print") 1 (length args)
+    FnCall (Identifier "i64_to_str") args -> case args of
+        [arg] -> eval arg >>= \case
+            i@(ResInt _) -> pure . ResStr $ display i
+            err          -> errUnexpectedType "integer" err
+        args -> errWrongArgumentCount (Identifier "i64_to_str") 1 (length args)
+    FnCall (Identifier "str_to_i64") args -> case args of
+        [arg] -> eval arg >>= \case
+            ResStr str -> pure . ResInt . read $ T.unpack str
+            err        -> errUnexpectedType "str" err
+        args -> errWrongArgumentCount (Identifier "str_to_i64") 1 (length args)
     FnCall fnName args -> evalFnCall fnName args
 
     -- Misc

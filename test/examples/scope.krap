@@ -2,6 +2,10 @@ fn f() {
     2
 }
 
+fn print_i64(i: I64) {
+    println(i64_to_str(i));
+}
+
 fn main() {
     {
         fn h(j: I64) -> I64 {
@@ -18,6 +22,6 @@ fn main() {
         }
         let r: I64 = e();
     };
-    debug(g);
+    print_i64(g);
     debug_env();
 }

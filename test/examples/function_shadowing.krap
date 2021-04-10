@@ -2,6 +2,10 @@ fn t() {
     1
 }
 
+fn print_i64(i: I64) {
+    println(i64_to_str(i));
+}
+
 fn main() {
     // Functions can be used before their definition if they occur in the same scope.
     // I think this is called hoisting, at least in JavaScript terms.
@@ -11,5 +15,5 @@ fn main() {
         2
     }
 
-    debug(f); // Should print 2
+    print_i64(f); // Should print 2
 }

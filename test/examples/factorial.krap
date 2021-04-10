@@ -11,5 +11,5 @@ fn fac(n: I64) -> I64 {
 
 fn main() {
     let f: I64 = fac(10);
-    debug(f); // TODO: Change to print_i64 or something when proper IO is implemented
+    println(i64_to_str(f));
 }
