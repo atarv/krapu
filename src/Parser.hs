@@ -20,6 +20,7 @@ import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
+import           Text.Megaparsec.Debug
 
 import           AST
 
@@ -54,6 +55,9 @@ betweenParens = between (symbol "(") (symbol ")")
 
 betweenBraces :: Parser a -> Parser a
 betweenBraces = between (symbol "{") (symbol "}")
+
+betweenBrackets :: Parser a -> Parser a
+betweenBrackets = between (symbol "[") (symbol "]")
 
 -- | Reserved words of the language. These cannot be used as identifiers.
 reservedWords :: Set Text
@@ -109,7 +113,12 @@ operatorTable =
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
-literal = integerLiteral <|> try booleanLiteral <|> unitLiteral <|> strLiteral
+literal =
+    integerLiteral
+        <|> try booleanLiteral
+        <|> unitLiteral
+        <|> strLiteral
+        <|> arrayLiteral
 
 -- | Parse literal unit, @()@
 unitLiteral :: Parser Expr
@@ -123,16 +132,29 @@ strLiteral = Str . T.pack <$ char '"' <*> Lex.charLiteral `manyTill` char '"'
 variable :: Parser Expr
 variable = Var <$> identifier
 
+-- | Parse an array literal
+--
+-- >>> parse arrayLiteral "" "[1, 2 /* */, 1 + 2]"
+-- Right (ArrayLit [IntLit 1,IntLit 2,IntLit 1 :+ IntLit 2])
+arrayLiteral :: Parser Expr
+arrayLiteral = ArrayLit <$> betweenBrackets (expression `sepBy` symbol ",")
+
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term =
-    betweenParens expression
+term = do
+    -- This parser had to be written in this kind of unfortunate way because of 
+    -- left recursion introduced by array access
+    first <-
+        betweenParens expression
         <|> ifExpr
         <|> blockExpr
         <|> literal
         <|> try functionCall
         <|> variable
         <?> "term"
+    optional (betweenBrackets expression) >>= \case
+        Nothing    -> pure first
+        Just index -> pure $ ArrayAccess first index
 
 -- | Parses an expression
 expression :: Parser Expr

@@ -47,13 +47,13 @@ data Statement
     | StatementReturn (Maybe Expr)
     deriving (Show, Eq)
 
--- | Expressions always produce a value and may perform side effects
 data Expr
     -- Literals
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
     | Str Text
+    | ArrayLit [Expr]
     -- Variables
     | Var Identifier
     -- Arithmetic
@@ -84,4 +84,5 @@ data Expr
     -- Misc
     | Break Expr
     | FnCall Identifier [Expr]
+    | ArrayAccess Expr Expr
     deriving (Show, Eq)

@@ -1,0 +1,4 @@
+fn main() {
+    let arr: StringArray = ["incorrect", "not correct either", "correct!"];
+    println(arr[2]); // Should print correct!
+}

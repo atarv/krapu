@@ -13,6 +13,7 @@ module Interpreter where
 
 import           Control.Monad
 import           Control.Monad.State.Strict
+import           Data.Array.IO
 import           Data.IORef
 import           Data.List                      ( intercalate )
 import           Data.List.NonEmpty             ( NonEmpty(..)
@@ -38,7 +39,22 @@ data Result
     | ResInt Integer
     | ResBool Bool
     | ResStr Text
-    deriving (Show, Eq, Ord)
+    | ResArr (IOArray Integer Result)
+    deriving (Eq)
+
+instance Show Result where
+    show ResUnit       = "()"
+    show (ResInt  i  ) = show i
+    show (ResBool b  ) = show b
+    show (ResStr  str) = "\"" <> show str <> "\""
+    show (ResArr  _  ) = "array"
+
+instance Ord Result where
+    compare ResUnit     ResUnit     = EQ
+    compare (ResInt  a) (ResInt  b) = compare a b
+    compare (ResBool p) (ResBool q) = compare p q
+    compare (ResStr  s) (ResStr  t) = compare s t
+    compare a           b           = if a == b then EQ else LT -- TODO:
 
 -- | Symbol table holds variables and their values
 type SymTable = NonEmpty (Map Identifier (IORef Result))
@@ -227,13 +243,17 @@ addItem _                    = pure ()
 eval :: Expr -> Interpreter Result
 eval = \case
     -- Literals
-    Unit        -> pure ResUnit
-    IntLit  i   -> pure $ ResInt i
-    BoolLit b   -> pure $ ResBool b
-    Str     str -> pure $ ResStr str
+    Unit         -> pure ResUnit
+    IntLit   i   -> pure $ ResInt i
+    BoolLit  b   -> pure $ ResBool b
+    Str      str -> pure $ ResStr str
+    ArrayLit arr -> do
+        elements <- traverse eval arr
+        newArr <- liftIO $ newListArray (0, fromIntegral $ length arr) elements
+        pure $ ResArr newArr
 
     -- Variables
-    Var     idf -> lookupVar idf
+    Var idf     -> lookupVar idf
 
      -- Arithmetic
     lhs :+ rhs  -> binaryIntOp (+) lhs rhs
@@ -311,6 +331,17 @@ eval = \case
 
     -- Misc
     Break _expr        -> fail "break not implemented"
+    ArrayAccess exprIndexed exprIndex ->
+        liftM2 (,) (eval exprIndexed) (eval exprIndex) >>= \case
+            (ResArr arr, ResInt i) -> do
+                bounds <- liftIO $ getBounds arr
+                unless (inRange bounds i) . fail $ mconcat
+                    ["Index ", show i, " out of bounds ", show bounds]
+                liftIO $ readArray arr i
+            (indexed, index) ->
+                fail $ mconcat
+                    ["Cannot use ", show index, "to index ", show indexed]
+
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
         (ResInt l, ResInt r) -> pure $ ResInt (l `op` r)
@@ -319,13 +350,16 @@ eval = \case
         (ResBool l, ResBool r) -> pure $ ResBool (l `op` r)
         (l        , r        ) -> typeMismatch l r
     comparisonOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (l@(ResInt _), r@(ResInt _)) -> pure $ ResBool (l `op` r)
-        (l           , r           ) -> typeMismatch l r
+        (l@(ResInt  _), r@(ResInt _) ) -> pure $ ResBool (l `op` r)
+        (l@(ResBool _), r@(ResBool _)) -> pure $ ResBool (l `op` r)
+        (l@(ResStr  _), r@(ResStr _) ) -> pure $ ResBool (l `op` r)
+        (l            , r            ) -> typeMismatch l r
     equalityOp op lhs rhs = evalToPair lhs rhs >>= \case
         (l@(ResBool _), r@(ResBool _)) -> pure $ ResBool (l `op` r)
         (l@(ResInt  _), r@(ResInt _) ) -> pure $ ResBool (l `op` r)
         (l@ResUnit    , r@ResUnit    ) -> pure $ ResBool (l `op` r)
-        (l            , r            ) -> typeMismatch l r
+        (l@(ResStr _) , r@(ResStr _) ) -> pure $ ResBool (l `op` r)
+        (l, r) -> fail $ mconcat ["Cannot compare ", show l, " and ", show r]
     typeMismatch lhs rhs =
         fail $ concat ["Type mismatch: ", show lhs, ", ", show rhs]
     errUnexpectedType expected value =

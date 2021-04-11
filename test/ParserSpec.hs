@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module ParserSpec (spec) where
+module ParserSpec
+    ( spec
+    )
+where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -158,3 +161,19 @@ spec = do
         it "trailing commas are not allowed on argument list"
             $              parse functionCall ""
             `shouldFailOn` "f(1,2,)"
+
+    describe "Array literals" $ do
+        it "empty array" $ parse expression "" "[]" `shouldParse` ArrayLit []
+        it "some items"
+            $ parse expression "" "[1,2, /* can haz comments */ 1 + 2]"
+            `shouldParse` ArrayLit [IntLit 1, IntLit 2, IntLit 1 :+ IntLit 2]
+
+    describe "Array access" $ do
+        it "is parsed correctly with array literals"
+            $             parse expression "" "[1,2,3][2]"
+            `shouldParse` ArrayAccess
+                              (ArrayLit [IntLit 1, IntLit 2, IntLit 3])
+                              (IntLit 2)
+        it "on variable"
+            $             parse expression "" "foo[1]"
+            `shouldParse` ArrayAccess (Var (Identifier "foo")) (IntLit 1)
