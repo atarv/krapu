@@ -57,7 +57,8 @@ betweenBraces = between (symbol "{") (symbol "}")
 
 -- | Reserved words of the language. These cannot be used as identifiers.
 reservedWords :: Set Text
-reservedWords = Set.fromList ["else", "fn", "if", "let", "while", "break"]
+reservedWords =
+    Set.fromList ["else", "fn", "if", "let", "while", "break", "loop"]
 
 booleanLiteral :: Parser Expr
 booleanLiteral =

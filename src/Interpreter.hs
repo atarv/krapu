@@ -158,17 +158,17 @@ printEnv = do
     let showContexts = traverse
             (\(syms, defs) -> (<> showFnDefs defs) <$> showValVarPairs syms)
             contexts
-    liftIO $ showContexts >>= putStr . separate
+    liftIO $ showContexts >>= T.putStr . separate
   where
-    separate        = intercalate "---\n" . NonEmpty.toList
+    separate        = T.intercalate "---\n" . NonEmpty.toList
     showValVarPairs = Map.foldMapWithKey
         (\(Identifier idf) valRef -> do
             val <- liftIO $ readIORef valRef
-            return $ T.unpack idf <> " = " <> show val <> "\n"
+            return $ idf <> " = " <> display val <> "\n"
         )
     showFnDefs = Map.foldMapWithKey
         (\(Identifier idf) (FnDef params _) ->
-            T.unpack $ mconcat ["fn ", idf, "(", commaSep params, ")\n"]
+            mconcat ["fn ", idf, "(", commaSep params, ")\n"]
         )
     commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
 
@@ -330,7 +330,7 @@ eval = \case
             err ->
                 fail
                     $  "Loop predicate must evaluate to boolean value, got "
-                    <> show err
+                    <> (T.unpack . display) err
 
     evalFnCall :: Identifier -> [Expr] -> Interpreter Result
     evalFnCall fnName args = do
