@@ -1,0 +1,15 @@
+/* 
+ * Function for calculating the factorial of n
+ */
+fn fac(n: I64) -> I64 {
+    if n <= 1 {
+        1
+    } else {
+        n * fac(n - 1)
+    }
+}
+
+fn main() {
+    let f: I64 = fac(10);
+    println(i64_to_str(f));
+}

@@ -19,10 +19,10 @@ import           Data.Text                      ( Text )
 newtype Crate = Crate [Item] deriving Show
 
 -- | Type represents type names
-newtype Type = Type Text deriving (Show, Eq)
+newtype Type = Type Text deriving (Show, Eq, Ord)
 
 -- | Identifiers are the names of variables, constants, parameters etc.
-newtype Identifier = Identifier Text deriving (Show, Eq)
+newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
@@ -34,9 +34,8 @@ type Parameter = (Identifier, Type)
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
 data Block
-    = Block [Statement]
     -- | Outer expression will determine the return value of the block
-    | BlockExpr [Statement] Expr
+    = Block [Statement] Expr
     deriving (Show, Eq)
 
 -- | Single statement
@@ -44,38 +43,45 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
+    | StatementLet Identifier Type Expr
+    | StatementReturn (Maybe Expr)
     deriving (Show, Eq)
 
 -- | Expressions always produce a value and may perform side effects
 data Expr
-    = IntLit Integer
+    -- Literals
+    = Unit -- ^ Same as @()@ in Haskell and Rust
+    | IntLit Integer
     | BoolLit Bool
-    | UnaryOp UnaryOperator Expr
-    | BinaryOp Operator Expr Expr
-    | IfExpr Expr Block (Maybe Block)
-    deriving (Show, Eq)
-
--- | Binary operators
-data Operator
+    | Str Text
+    -- Variables
+    | Var Identifier
     -- Arithmetic
-    = Add -- ^ Addition
-    | Sub -- ^ Subtraction
-    | Mul -- ^ Multiplication
-    | Div -- ^ Division
+    | Negate Expr
+    | Plus Expr
+    | Expr :+ Expr
+    | Expr :- Expr
+    | Expr :* Expr
+    | Expr :/ Expr
     -- Boolean
-    | And -- ^ Lazy AND
-    | Or  -- ^ Lazy OR
+    | Expr :&& Expr
+    | Expr :|| Expr
+    | Not Expr
     -- Comparison
-    | Greater
-    | GreaterOrEqual
-    | Lesser
-    | LesserOrEqual
-    | Equal
-    | NotEqual
-    deriving (Show, Eq)
-
-data UnaryOperator
-    = Negate
-    | Plus
-    | Not -- ^ Boolean NOT
+    | Expr :> Expr
+    | Expr :>= Expr
+    | Expr :< Expr
+    | Expr :<= Expr
+    | Expr :== Expr
+    | Expr :!= Expr
+    -- Expressions with block
+    | IfExpr [(Expr, Block)] (Maybe Block)
+    | ExprBlock Block
+    | Loop Block
+    | While Expr Block
+    -- Assignment
+    | Expr := Expr
+    -- Misc
+    | Break Expr
+    | FnCall Identifier [Expr]
     deriving (Show, Eq)
