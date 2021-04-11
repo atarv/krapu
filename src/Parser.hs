@@ -188,11 +188,14 @@ statement =
     try emptyStatement
         <|> try itemStatement
         <|> try letStatement
+        <|> try returnStatement
         <|> try statementExpr
   where
     emptyStatement = StatementEmpty <$ symbol ";"
     itemStatement  = StatementItem <$> item
     statementExpr  = StatementExpr <$> expression <* symbol ";"
+    returnStatement =
+        StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
     letStatement =
         StatementLet
             <$> (symbol "let" *> identifier)

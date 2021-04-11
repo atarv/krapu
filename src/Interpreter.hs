@@ -49,8 +49,14 @@ data FnDef = FnDef [Identifier] Block
 -- | Function definitions
 type FnDefs = NonEmpty (Map Identifier FnDef)
 
--- | Environment of the interpreted program
-data Env = Env { symTable :: SymTable, fnDefs :: FnDefs }
+-- | Environment of the interpreted program. Krapu is block scoped, so function
+-- definitions and symbol tabels are handled in a stack-like way.
+data Env =
+    Env { symTable :: SymTable -- ^ Variables
+        , fnDefs :: FnDefs -- ^ Function definitions
+        , returning :: Maybe Result -- ^ If set, the value that is being 
+                                    -- returned from function
+        }
 
 type Interpreter a = StateT Env IO a
 
@@ -66,7 +72,7 @@ display = \case
 
 -- | Creates a blank environment
 emptyEnv :: Env
-emptyEnv = Env (Map.empty :| []) (Map.empty :| [])
+emptyEnv = Env (Map.empty :| []) (Map.empty :| []) Nothing
 
 -- | @findVarRef e i@ Find reference to value of the variable which identifier 
 -- @i@ refers to (in environment @e@).
@@ -151,6 +157,15 @@ withinNewScope action = modify' beginScope >> action <* modify' exitScope
     -- always added before exiting
     removeScope = NonEmpty.fromList . NonEmpty.tail
 
+-- | Set value that is returned from function. All statements are skipped until
+-- function is exited (return value is cleared).
+setReturn :: Result -> Interpreter ()
+setReturn val = modify' (\env -> env { returning = Just val })
+
+-- | Clear returned value
+clearReturn :: Interpreter ()
+clearReturn = modify' (\env -> env { returning = Nothing })
+
 -- | Print environment starting from the innermost context
 printEnv :: Interpreter ()
 printEnv = do
@@ -174,23 +189,33 @@ printEnv = do
 
 -- * Interpreting
 
--- | Blocks evaluate to their outer expression's result.
+-- | Blocks evaluate to their outer expression's result or the first return 
+-- statement's result.
 evalBlock :: Block -> Interpreter Result
 evalBlock (Block stmts outerExpr) = withinNewScope $ do
     mapM_ addItem       stmts
     mapM_ execStatement stmts
-    eval outerExpr
+    returnVal <- gets returning
+    case returnVal of
+        Nothing  -> eval outerExpr
+        -- Outer expression is not evaluated when returning early
+        Just val -> pure val
 
 -- | Statements change the program environment (declare new variables and change
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
-execStatement = \case
-    StatementEmpty              -> pure ()
-    StatementExpr expr          -> void $ eval expr
-    -- Items should be added to environment using 'addItem' before executing
-    StatementItem _             -> pure ()
-    StatementLet idf _type expr -> eval expr >>= defineVar idf
+execStatement stmt = gets returning >>= \case
+    Nothing -> case stmt of
+        StatementEmpty              -> pure ()
+        StatementExpr expr          -> void $ eval expr
+        -- Items should be added to environment using 'addItem' before executing
+        StatementItem _             -> pure ()
+        StatementLet idf _type expr -> eval expr >>= defineVar idf
+        StatementReturn expr -> maybe (pure ResUnit) eval expr >>= setReturn
+    -- If function is returning, statements are skipped until function is 
+    -- exited. See 'evalBlock'
+    Just _ -> pure ()
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
@@ -346,7 +371,7 @@ eval = \case
         -- change the semantics.
         withinNewScope $ do
             mapM_ (uncurry defineVar) argDefs -- add parameter values to scope
-            evalBlock body
+            evalBlock body <* clearReturn
 
 -- | Run the main program of the crate. Fails if main is not defined.
 runProgram :: Crate -> IO ()

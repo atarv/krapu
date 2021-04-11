@@ -33,6 +33,7 @@ exampleEnv = do
             ]
         )
         exampleFnDefs
+        Nothing
 
 exampleFnDefs :: FnDefs
 exampleFnDefs = Map.fromList [min] :| []
@@ -209,6 +210,22 @@ spec = do
             $ let fnCallNotFound =
                       usingExampleEnv $ eval (FnCall (Identifier "föö") [])
               in  fnCallNotFound `shouldThrow` anyException
+        it "work with early return"
+            $ let earlyRet = usingExampleEnv $ do
+                      defineItem
+                          (Function
+                              (Identifier "f")
+                              []
+                              (Type "I64")
+                              (Block
+                                  [ StatementReturn (Just $ IntLit 1)
+                                  , StatementReturn (Just $ IntLit 2)
+                                  ]
+                                  (IntLit 3)
+                              )
+                          )
+                      eval (FnCall (Identifier "f") [])
+              in  earlyRet `shouldReturn` ResInt 1
 
     describe "Primitive functions" $ do
         prop "str_to_i64(i64_to_str(x)) == x" $ \x ->
