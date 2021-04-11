@@ -20,7 +20,6 @@ import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
-import           Text.Megaparsec.Debug
 
 import           AST
 
@@ -148,6 +147,8 @@ term = do
         betweenParens expression
         <|> ifExpr
         <|> blockExpr
+        <|> whileLoop
+        <|> loop
         <|> literal
         <|> try functionCall
         <|> variable

@@ -15,7 +15,6 @@ import           Control.Monad
 import           Control.Monad.State.Strict
 import           Data.Array.IO
 import           Data.IORef
-import           Data.List                      ( intercalate )
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
@@ -83,6 +82,7 @@ display = \case
     ResInt  i   -> T.pack $ show i
     ResBool b   -> T.pack $ show b
     ResStr  str -> "\"" <> str <> "\""
+    ResArr arr -> "[array]"
 
 -- * Environment handling
 
@@ -408,7 +408,12 @@ eval = \case
             evalBlock body <* clearReturn
 
 -- | Run the main program of the crate. Fails if main is not defined.
-runProgram :: Crate -> IO ()
-runProgram (Crate items) = void $ flip execStateT emptyEnv $ do
+runProgram :: [String] -> Crate -> IO ()
+runProgram args (Crate items) = void $ flip execStateT emptyEnv $ do
     mapM_ defineItem items
+    -- Define argument count and argument values implicitly as global variables
+    let argc = fromIntegral $ length args
+    argv <- liftIO $ newListArray (0, argc) (fmap (ResStr . T.pack) args)
+    defineVar (Identifier "argc") (ResInt argc)
+    defineVar (Identifier "argv") (ResArr argv)
     eval (FnCall (Identifier "main") [])

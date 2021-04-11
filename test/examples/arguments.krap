@@ -1,0 +1,11 @@
+fn main() {
+    /* argc and argv are implicitly declared global variables that contain 
+     * the programs argument count and their values respectively 
+     */
+    println(i64_to_str(argc));
+    let i: I64 = 0;
+    while (i < argc) {
+        println(argv[i]);
+        i = i + 1;
+    }
+}
