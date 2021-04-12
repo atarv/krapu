@@ -153,9 +153,11 @@ term = do
         <|> try functionCall
         <|> variable
         <?> "term"
-    optional (betweenBrackets expression) >>= \case
-        Nothing    -> pure first
-        Just index -> pure $ ArrayAccess first index
+    many (betweenBrackets expression) >>= \case
+        []       -> pure first
+        [index ] -> pure $ ArrayAccess first index
+        -- Ok ok, this feels way too hacky but works so far
+        (i : is) -> pure $ foldl ArrayAccess (ArrayAccess first i) is
 
 -- | Parses an expression
 expression :: Parser Expr

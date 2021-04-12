@@ -82,7 +82,7 @@ display = \case
     ResInt  i   -> T.pack $ show i
     ResBool b   -> T.pack $ show b
     ResStr  str -> "\"" <> str <> "\""
-    ResArr arr -> "[array]"
+    ResArr  arr -> "[array]"
 
 -- * Environment handling
 
@@ -195,7 +195,18 @@ printEnv = do
     showValVarPairs = Map.foldMapWithKey
         (\(Identifier idf) valRef -> do
             val <- liftIO $ readIORef valRef
-            return $ idf <> " = " <> display val <> "\n"
+            case val of
+                ResArr arr -> do
+                    elems <- getElems arr
+                    return
+                        $ mconcat
+                              [ idf
+                              , " = "
+                              , "["
+                              , T.intercalate ", " (display <$> elems)
+                              , "]\n"
+                              ]
+                _ -> return $ idf <> " = " <> display val <> "\n"
         )
     showFnDefs = Map.foldMapWithKey
         (\(Identifier idf) (FnDef params _) ->
@@ -275,21 +286,28 @@ eval = \case
         val       -> errUnexpectedType "bool" val
 
      -- Comparison
-    lhs     :<                         rhs -> comparisonOp (<) lhs rhs
-    lhs     :>                         rhs -> comparisonOp (>) lhs rhs
-    lhs     :<=                        rhs -> comparisonOp (<=) lhs rhs
-    lhs     :>=                        rhs -> comparisonOp (>=) lhs rhs
+    lhs     :<  rhs  -> comparisonOp (<) lhs rhs
+    lhs     :>  rhs  -> comparisonOp (>) lhs rhs
+    lhs     :<= rhs  -> comparisonOp (<=) lhs rhs
+    lhs     :>= rhs  -> comparisonOp (>=) lhs rhs
 
      -- Equality
-    lhs     :==                        rhs -> equalityOp (==) lhs rhs
-    lhs     :!=                        rhs -> equalityOp (/=) lhs rhs
+    lhs     :== rhs  -> equalityOp (==) lhs rhs
+    lhs     :!= rhs  -> equalityOp (/=) lhs rhs
 
     -- Variables and assignment
-    Var idf :=                         rhs -> eval rhs >>= assignVar idf
+    Var idf :=  rhs  -> eval rhs >>= assignVar idf
+    (:=) (ArrayAccess (Var idf) indexExpr) expr -> do
+        liftM2 (,) (lookupVar idf) (eval indexExpr) >>= \case
+            (ResArr arr, ResInt i) -> do
+                val <- eval expr
+                liftIO $ writeArray arr i val
+                pure val
+            (indexed, index) -> errCannotIndex indexed index
     err := _ -> fail $ "Cannot assign to expression " <> show err
 
     -- Expressions with blocks
-    IfExpr  ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
+    IfExpr ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
         ResBool b -> if b then evalBlock conseq else eval $ IfExpr elseIfs alt
         val       -> errUnexpectedType "bool" val
     IfExpr [] (Just alt)             -> evalBlock alt
@@ -338,9 +356,7 @@ eval = \case
                 unless (inRange bounds i) . fail $ mconcat
                     ["Index ", show i, " out of bounds ", show bounds]
                 liftIO $ readArray arr i
-            (indexed, index) ->
-                fail $ mconcat
-                    ["Cannot use ", show index, "to index ", show indexed]
+            (indexed, index) -> errCannotIndex indexed index
 
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
@@ -365,6 +381,8 @@ eval = \case
     errUnexpectedType expected value =
         fail $ concat
             ["Unexpected type: expected ", expected, ", got ", show value]
+    errCannotIndex indexed index =
+        fail $ mconcat ["Cannot use ", show index, "to index ", show indexed]
 
     errWrongArgumentCount :: Identifier -> Int -> Int -> Interpreter Result
     errWrongArgumentCount (Identifier fnName) expected got = fail $ mconcat
@@ -413,7 +431,7 @@ runProgram args (Crate items) = void $ flip execStateT emptyEnv $ do
     mapM_ defineItem items
     -- Define argument count and argument values implicitly as global variables
     let argc = fromIntegral $ length args
-    argv <- liftIO $ newListArray (0, argc) (fmap (ResStr . T.pack) args)
+    argv <- liftIO $ newListArray (0, argc - 1) (ResStr . T.pack <$> args)
     defineVar (Identifier "argc") (ResInt argc)
     defineVar (Identifier "argv") (ResArr argv)
     eval (FnCall (Identifier "main") [])
