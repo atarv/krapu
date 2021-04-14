@@ -10,6 +10,7 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Interpreter where
 
+import           Control.Exception
 import           Control.Monad
 import           Control.Monad.State.Strict
 import           Control.Monad.Except
@@ -466,11 +467,28 @@ eval = \case
 
 -- | Run the main program of the crate. Fails if main is not defined.
 runProgram :: [String] -> Crate -> IO ()
-runProgram args (Crate items) = void $ flip execStateT emptyEnv $ do
+runProgram args crate = void $ flip execStateT emptyEnv $ do
+    initProgram args crate
+    eval (FnCall (Identifier "main") [])
+
+-- | Initialize the program state
+initProgram :: [String] -> Crate -> Interpreter ()
+initProgram args (Crate items) = do
     mapM_ defineItem items
     -- Define argument count and argument values implicitly as global variables
     let argc = fromIntegral $ length args
     argv <- liftIO $ newListArray (0, argc - 1) (ResStr . T.pack <$> args)
     defineVar (Identifier "argc") (ResInt argc)
     defineVar (Identifier "argv") (ResArr argv)
-    eval (FnCall (Identifier "main") [])
+
+-- | Run a very bare bones REPL constantly asking for statements to execute. 
+-- Not much of a P currently since it doesn't print anything, but user can call
+-- the primitive functions to inspect program state.
+runRepl :: [String] -> IO Statement -> IO ()
+runRepl args prompt = void $ flip execStateT emptyEnv $ do
+    initProgram args (Crate [])
+    forever $ do
+        stmt <- liftIO prompt
+        flip catchError (liftIO . print) $ do
+            addItem stmt
+            execStatement stmt

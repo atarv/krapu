@@ -278,7 +278,8 @@ item = functionDeclaration
 crate :: Parser Crate
 crate = between spaceConsumer eof $ Crate <$> some item
 
--- | Parse a crate. Parse error is converted to text.
+-- | Parse a crate. Parse error is converted to text. First argument is the 
+-- source file name, which is displayed on error.
 parseCrate :: String -> Text -> Either Text Crate
 parseCrate src content =
     first (T.pack . errorBundlePretty) $ parse crate src content
@@ -288,3 +289,9 @@ parseCrate src content =
 parseProgram :: String -> Text -> Either Text Text
 parseProgram src content =
     bimap (T.pack . errorBundlePretty) (T.pack . show) $ parse crate src content
+
+-- | Parse a statement. Error is converted to text. First argument is the 
+-- source file name, which is displayed on error.
+parseStatement :: String -> Text -> Either Text Statement
+parseStatement src content =
+    first (T.pack . errorBundlePretty) $ parse statement src content
