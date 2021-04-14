@@ -19,10 +19,10 @@ import           Data.Text                      ( Text )
 newtype Crate = Crate [Item] deriving Show
 
 -- | Type represents type names
-newtype Type = Type Text deriving (Show, Eq)
+newtype Type = Type Text deriving (Show, Eq, Ord)
 
 -- | Identifiers are the names of variables, constants, parameters etc.
-newtype Identifier = Identifier Text deriving (Show, Eq)
+newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
@@ -34,9 +34,8 @@ type Parameter = (Identifier, Type)
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
 data Block
-    = Block [Statement]
     -- | Outer expression will determine the return value of the block
-    | BlockExpr [Statement] Expr
+    = Block [Statement] Expr
     deriving (Show, Eq)
 
 -- | Single statement
@@ -44,14 +43,20 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
+    | StatementLet Identifier Type Expr
+    | StatementReturn (Maybe Expr)
+    | StatementBreak Expr
     deriving (Show, Eq)
 
--- | Expressions always produce a value and may perform side effects
 data Expr
     -- Literals
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
+    | Str Text
+    | ArrayLit [Expr]
+    -- Variables
+    | Var Identifier
     -- Arithmetic
     | Negate Expr
     | Plus Expr
@@ -71,5 +76,13 @@ data Expr
     | Expr :== Expr
     | Expr :!= Expr
     -- Expressions with block
-    | IfExpr Expr Block (Maybe Block)
+    | IfExpr [(Expr, Block)] (Maybe Block)
+    | ExprBlock Block
+    | Loop Block
+    | While Expr Block
+    -- Assignment
+    | Expr := Expr
+    -- Misc
+    | FnCall Identifier [Expr]
+    | ArrayAccess Expr Expr
     deriving (Show, Eq)

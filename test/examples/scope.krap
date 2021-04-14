@@ -1,0 +1,27 @@
+fn f() {
+    2
+}
+
+fn print_i64(i: I64) {
+    println(i64_to_str(i));
+}
+
+fn main() {
+    {
+        fn h(j: I64) -> I64 {
+            3 + j
+        }
+        h(3)
+    // When using blocks as a statement, semicolon must be used to make separate
+    //  them from block expressions.
+    };
+    let g: I64 = f() + 2;
+    {
+        fn e() -> I64 {
+            g
+        }
+        let r: I64 = e();
+    };
+    print_i64(g);
+    debug_env();
+}

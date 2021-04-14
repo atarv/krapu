@@ -1,0 +1,8 @@
+fn f() -> I64 {
+    42
+}
+
+fn main() {
+    return f();
+    println("This shouldn't print");
+}
