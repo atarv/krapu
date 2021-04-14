@@ -7,7 +7,6 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 -}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE TupleSections     #-}
 
 module Interpreter where
 
@@ -104,12 +103,11 @@ lookIdentifier idf vars found = case Map.lookup idf vars of
 
 -- | Lookup a variable's value. Fails if variable is not defined yet.
 lookupVar :: Identifier -> Interpreter Result
-lookupVar idf = do
-    findVarRef idf >>= \case
-        Just valRef -> liftIO $ readIORef valRef
-        Nothing ->
-            let (Identifier var) = idf
-            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+lookupVar idf = findVarRef idf >>= \case
+    Just valRef -> liftIO $ readIORef valRef
+    Nothing ->
+        let (Identifier var) = idf
+        in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
 -- | @onHeadOf f xs@ returns the list @xs@ with function @f@ applied on it's 
 -- first element.
@@ -126,14 +124,13 @@ defineVar idf val = do
 
 -- | Assign value to variable
 assignVar :: Identifier -> Result -> Interpreter Result
-assignVar idf val = do
-    findVarRef idf >>= \case
-        Just valRef -> liftIO $ do
-            modifyIORef' valRef (const val)
-            readIORef valRef
-        Nothing ->
-            let (Identifier var) = idf
-            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+assignVar idf val = findVarRef idf >>= \case
+    Just valRef -> liftIO $ do
+        modifyIORef' valRef (const val)
+        readIORef valRef
+    Nothing ->
+        let (Identifier var) = idf
+        in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
 -- | Add item definition to environment
 defineItem :: Item -> Interpreter ()
@@ -317,18 +314,18 @@ eval = \case
         val       -> errUnexpectedType "bool" val
 
      -- Comparison
-    lhs     :<  rhs  -> comparisonOp (<) lhs rhs
-    lhs     :>  rhs  -> comparisonOp (>) lhs rhs
-    lhs     :<= rhs  -> comparisonOp (<=) lhs rhs
-    lhs     :>= rhs  -> comparisonOp (>=) lhs rhs
+    lhs     :<  rhs -> comparisonOp (<) lhs rhs
+    lhs     :>  rhs -> comparisonOp (>) lhs rhs
+    lhs     :<= rhs -> comparisonOp (<=) lhs rhs
+    lhs     :>= rhs -> comparisonOp (>=) lhs rhs
 
      -- Equality
-    lhs     :== rhs  -> equalityOp (==) lhs rhs
-    lhs     :!= rhs  -> equalityOp (/=) lhs rhs
+    lhs     :== rhs -> equalityOp (==) lhs rhs
+    lhs     :!= rhs -> equalityOp (/=) lhs rhs
 
     -- Variables and assignment
-    Var idf :=  rhs  -> eval rhs >>= assignVar idf
-    (:=) (ArrayAccess (Var idf) indexExpr) expr -> do
+    Var idf :=  rhs -> eval rhs >>= assignVar idf
+    ArrayAccess (Var idf) indexExpr := expr ->
         liftM2 (,) (lookupVar idf) (eval indexExpr) >>= \case
             (ResArr arr, ResInt i) -> do
                 val <- eval expr

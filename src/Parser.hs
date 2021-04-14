@@ -70,8 +70,8 @@ booleanLiteral =
 -- | Parse integer literal. Supports different bases 
 -- (decimal, binary, octal, hexadecimal).
 integerLiteral :: Parser Expr
-integerLiteral = fmap IntLit . lexeme . label "integer literal" $ do
-    nonDefaultBase <|> base10
+integerLiteral =
+    fmap IntLit . lexeme . label "integer literal" $ nonDefaultBase <|> base10
   where
     base10         = Lex.signed spaceConsumer (lexeme Lex.decimal)
     nonDefaultBase = choice (chunk <$> ["0b", "0o", "0x"]) >>= \case
@@ -165,7 +165,7 @@ expression = Expr.makeExprParser term operatorTable <?> "expression"
 
 -- | Parse an if-else-expression, else is optional.
 ifExpr :: Parser Expr
-ifExpr = do
+ifExpr =
     IfExpr
         <$> ((:) <$> ifBranch <*> many (try elseIfBranch))
         <*> optional elseBranch
@@ -252,8 +252,7 @@ block = betweenBraces $ Block <$> many statement <*> option Unit expression
 
 -- | Parse a function call
 functionCall :: Parser Expr
-functionCall = do
-    FnCall <$> identifier <*> argList
+functionCall = FnCall <$> identifier <*> argList
     where argList = betweenParens (expression `sepBy` symbol ",")
 
 -- | Parse a function declaration. Return type may be omitted.
