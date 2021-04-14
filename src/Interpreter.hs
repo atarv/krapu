@@ -53,7 +53,7 @@ instance Ord Result where
     compare (ResInt  a) (ResInt  b) = compare a b
     compare (ResBool p) (ResBool q) = compare p q
     compare (ResStr  s) (ResStr  t) = compare s t
-    compare a           b           = if a == b then EQ else LT -- TODO:
+    compare _           _           = undefined -- TODO:
 
 -- | Symbol table holds variables and their values
 type SymTable = NonEmpty (Map Identifier (IORef Result))
@@ -82,7 +82,7 @@ display = \case
     ResInt  i   -> T.pack $ show i
     ResBool b   -> T.pack $ show b
     ResStr  str -> "\"" <> str <> "\""
-    ResArr  arr -> "[array]"
+    ResArr  _   -> "[array]"
 
 -- * Environment handling
 
@@ -109,14 +109,18 @@ lookupVar idf = do
             let (Identifier var) = idf
             in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
+-- | @onHeadOf f xs@ returns the list @xs@ with function @f@ applied on it's 
+-- first element.
+onHeadOf :: (a -> a) -> NonEmpty a -> NonEmpty a
+onHeadOf fn (x :| xs) = fn x :| xs
+
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.
 defineVar :: Identifier -> Result -> Interpreter ()
 defineVar idf val = do
     valRef <- liftIO $ newIORef val
     env    <- get
-    put $ env { symTable = addVar valRef (symTable env) }
-    where addVar valRef (ctx :| ctxs) = Map.insert idf valRef ctx :| ctxs
+    put $ env { symTable = Map.insert idf valRef `onHeadOf` symTable env }
 
 -- | Assign value to variable
 assignVar :: Identifier -> Result -> Interpreter Result
@@ -136,15 +140,17 @@ defineItem = \case
         -- First check that there isn't already a function with same identifier
         -- in current context. Shadowing functions in outer scopes is allowed.
         env <- get
-        maybe addDefinition (errAlreadyDefined identifier)
+        maybe addDefinition (const $ errAlreadyDefined identifier)
             $ Map.lookup identifier (NonEmpty.head (fnDefs env))
       where
-        addDefinition = modify' $ \env ->
-            let (ctx :| ctxs) = fnDefs env
-                newFnDef      = FnDef (fmap fst params) body
-                updatedDefs   = Map.insert identifier newFnDef ctx :| ctxs
-            in  env { fnDefs = updatedDefs }
-        errAlreadyDefined (Identifier idf) _ =
+        newFnDef = FnDef (fmap fst params) body
+        addDefinition =
+            modify'
+                $ \env -> env
+                      { fnDefs = Map.insert identifier newFnDef
+                                     `onHeadOf` fnDefs env
+                      }
+        errAlreadyDefined (Identifier idf) =
             fail $ "function '" <> T.unpack idf <> "' is already defined"
 
 -- | Lookup function definition from environment
@@ -197,15 +203,8 @@ printEnv = do
             val <- liftIO $ readIORef valRef
             case val of
                 ResArr arr -> do
-                    elems <- getElems arr
-                    return
-                        $ mconcat
-                              [ idf
-                              , " = "
-                              , "["
-                              , T.intercalate ", " (display <$> elems)
-                              , "]\n"
-                              ]
+                    elems <- displayArray arr
+                    return $ mconcat [idf, " = ", elems, "\n"]
                 _ -> return $ idf <> " = " <> display val <> "\n"
         )
     showFnDefs = Map.foldMapWithKey
@@ -213,6 +212,10 @@ printEnv = do
             mconcat ["fn ", idf, "(", commaSep params, ")\n"]
         )
     commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
+    displayArray :: Ix a => IOArray a Result -> IO Text
+    displayArray arr = do
+        elems <- getElems arr
+        return $ "[" <> T.intercalate ", " (display <$> elems) <> "]"
 
 -- * Interpreting
 
@@ -233,6 +236,9 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
 execStatement stmt = gets returning >>= \case
+    -- If function is returning, statements are skipped until function is 
+    -- exited. See 'evalBlock'
+    Just _ -> pure ()
     Nothing -> case stmt of
         StatementEmpty              -> pure ()
         StatementExpr expr          -> void $ eval expr
@@ -240,9 +246,6 @@ execStatement stmt = gets returning >>= \case
         StatementItem _             -> pure ()
         StatementLet idf _type expr -> eval expr >>= defineVar idf
         StatementReturn expr -> maybe (pure ResUnit) eval expr >>= setReturn
-    -- If function is returning, statements are skipped until function is 
-    -- exited. See 'evalBlock'
-    Just _ -> pure ()
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
@@ -351,13 +354,12 @@ eval = \case
     Break _expr        -> fail "break not implemented"
     ArrayAccess exprIndexed exprIndex ->
         liftM2 (,) (eval exprIndexed) (eval exprIndex) >>= \case
-            (ResArr arr, ResInt i) -> do
+            (ResArr arr, ResInt index) -> do
                 bounds <- liftIO $ getBounds arr
-                unless (inRange bounds i) . fail $ mconcat
-                    ["Index ", show i, " out of bounds ", show bounds]
-                liftIO $ readArray arr i
+                unless (inRange bounds index) . fail $ mconcat
+                    ["Index ", show index, " out of bounds ", show bounds]
+                liftIO $ readArray arr index
             (indexed, index) -> errCannotIndex indexed index
-
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
         (ResInt l, ResInt r) -> pure $ ResInt (l `op` r)
