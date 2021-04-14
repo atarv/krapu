@@ -13,12 +13,14 @@ module Interpreter where
 
 import           Control.Monad
 import           Control.Monad.State.Strict
+import           Control.Monad.Except
 import           Data.Array.IO
 import           Data.IORef
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
 import           Data.Map.Strict                ( Map )
+import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
@@ -45,8 +47,8 @@ instance Show Result where
     show ResUnit       = "()"
     show (ResInt  i  ) = show i
     show (ResBool b  ) = show b
-    show (ResStr  str) = "\"" <> show str <> "\""
-    show (ResArr  _  ) = "array"
+    show (ResStr  str) = show str
+    show (ResArr  _  ) = "[array]"
 
 instance Ord Result where
     compare ResUnit     ResUnit     = EQ
@@ -71,24 +73,24 @@ data Env =
         , fnDefs :: FnDefs -- ^ Function definitions
         , returning :: Maybe Result -- ^ If set, the value that is being 
                                     -- returned from function
+        , breaking :: Maybe Result  -- ^ If set, this value is being returned 
+                                    -- from a loop
+        , breakContext :: NonEmpty Bool -- ^ If the head of list is true, break
+                                        -- statements are allowed
         }
 
 type Interpreter a = StateT Env IO a
 
 -- | Convert a result value to text in format the user should see it.
 display :: Result -> Text
-display = \case
-    ResUnit     -> "()"
-    ResInt  i   -> T.pack $ show i
-    ResBool b   -> T.pack $ show b
-    ResStr  str -> "\"" <> str <> "\""
-    ResArr  _   -> "[array]"
+display = T.pack . show
 
 -- * Environment handling
 
 -- | Creates a blank environment
 emptyEnv :: Env
-emptyEnv = Env (Map.empty :| []) (Map.empty :| []) Nothing
+emptyEnv =
+    Env (Map.empty :| []) (Map.empty :| []) Nothing Nothing (False :| [])
 
 -- | @findVarRef e i@ Find reference to value of the variable which identifier 
 -- @i@ refers to (in environment @e@).
@@ -188,6 +190,21 @@ setReturn val = modify' (\env -> env { returning = Just val })
 clearReturn :: Interpreter ()
 clearReturn = modify' (\env -> env { returning = Nothing })
 
+-- | Clear the value loop is breaked with
+clearBreak :: Interpreter ()
+clearBreak = modify' $ \env -> env { breaking = Nothing }
+
+-- | Execute given action with break statement allowed (@True@) or disallowed 
+-- (@False@).
+withBreakAllowed :: Bool -> Interpreter a -> Interpreter a
+withBreakAllowed bool action = do
+    modify' $ \env -> env { breakContext = bool <| breakContext env }
+    result <- action
+    modify' $ \env -> env
+        { breakContext = NonEmpty.fromList . NonEmpty.tail $ breakContext env
+        }
+    pure result
+
 -- | Print environment starting from the innermost context
 printEnv :: Interpreter ()
 printEnv = do
@@ -235,22 +252,33 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
-execStatement stmt = gets returning >>= \case
-    -- If function is returning, statements are skipped until function is 
-    -- exited. See 'evalBlock'
-    Just _ -> pure ()
-    Nothing -> case stmt of
-        StatementEmpty              -> pure ()
-        StatementExpr expr          -> void $ eval expr
-        -- Items should be added to environment using 'addItem' before executing
-        StatementItem _             -> pure ()
-        StatementLet idf _type expr -> eval expr >>= defineVar idf
-        StatementReturn expr -> maybe (pure ResUnit) eval expr >>= setReturn
+execStatement stmt =
+    liftM2 (||) (isJust <$> gets returning) (isJust <$> gets breaking) >>= \case
+    -- If function is returning or loop is exited with break, statements are 
+    -- skipped until function and/or loop is exited. See 'evalBlock'
+        True  -> pure ()
+        False -> case stmt of
+            StatementEmpty              -> pure ()
+            StatementExpr expr          -> void $ eval expr
+            -- Items should be added to environment using 'addItem' before executing
+            StatementItem _             -> pure ()
+            StatementLet idf _type expr -> eval expr >>= defineVar idf
+            StatementReturn expr ->
+                maybe (pure ResUnit) eval expr >>= setReturn
+            StatementBreak expr -> eval expr >>= breakWith
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
 addItem (StatementItem item) = defineItem item
 addItem _                    = pure ()
+
+-- | Break from with loop evaluating to given value. This will fail if breaking
+-- is not allowed in current context.
+breakWith :: Result -> Interpreter ()
+breakWith result = do
+    isAllowed <- NonEmpty.head <$> gets breakContext
+    unless isAllowed $ fail "Break statement is only allowed in loops"
+    modify' $ \env -> env { breaking = Just result }
 
 -- | Evaluate an expression. There will always be a result and side effects may
 -- be performed.
@@ -313,12 +341,36 @@ eval = \case
     IfExpr ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
         ResBool b -> if b then evalBlock conseq else eval $ IfExpr elseIfs alt
         val       -> errUnexpectedType "bool" val
-    IfExpr [] (Just alt)             -> evalBlock alt
-    IfExpr [] Nothing                -> pure ResUnit
+    IfExpr [] (Just alt) -> evalBlock alt
+    IfExpr [] Nothing    -> pure ResUnit
 
-    ExprBlock block                  -> evalBlock block
-    While condition body             -> evalWhile condition body
-    Loop body                        -> evalWhile (BoolLit True) body
+    ExprBlock block      -> evalBlock block
+    While predicate body -> withBreakAllowed True $ do
+        runExceptT . forever $ do
+            continue <- lift $ eval predicate >>= \case
+                ResBool b -> pure b
+                nonBool ->
+                    fail
+                        $  "Loop predicate must evaluate to boolean value, got "
+                        <> (T.unpack . display) nonBool
+            unless continue $ throwError () -- exit loop
+            gets breaking >>= \case
+                Nothing      -> void . lift $ evalBlock body
+                Just ResUnit -> throwError () -- exit loop
+                Just val ->
+                    fail
+                        .  T.unpack
+                        $  "Cannot break while loop with a non-unit value: "
+                        <> display val
+        ResUnit <$ clearBreak
+    Loop body -> withBreakAllowed True $ do
+        result <- runExceptT . forever $ gets breaking >>= \case
+            Nothing  -> void . lift $ evalBlock body
+            Just val -> throwError val
+        case result of
+            Left val -> val <$ clearBreak
+            Right () ->
+                fail "Loop was exited without break. This shouldn't happen."
 
     -- Function calls and primitive functions
     FnCall (Identifier "debug") args -> do
@@ -348,10 +400,9 @@ eval = \case
             ResStr str -> pure . ResInt . read $ T.unpack str
             err        -> errUnexpectedType "str" err
         args -> errWrongArgumentCount (Identifier "str_to_i64") 1 (length args)
-    FnCall fnName args -> evalFnCall fnName args
+    FnCall fnName args -> withBreakAllowed False $ evalFnCall fnName args
 
     -- Misc
-    Break _expr        -> fail "break not implemented"
     ArrayAccess exprIndexed exprIndex ->
         liftM2 (,) (eval exprIndexed) (eval exprIndex) >>= \case
             (ResArr arr, ResInt index) -> do
@@ -387,29 +438,18 @@ eval = \case
         fail $ mconcat ["Cannot use ", show index, "to index ", show indexed]
 
     errWrongArgumentCount :: Identifier -> Int -> Int -> Interpreter Result
-    errWrongArgumentCount (Identifier fnName) expected got = fail $ mconcat
+    errWrongArgumentCount (Identifier fnName) expected actual = fail $ mconcat
         [ "Function '"
         , T.unpack fnName
         , "' expected "
         , show expected
         , " arguments, got "
-        , show got
+        , show actual
         ]
 
     -- Evaluate two expressions to a pair so they can be pattern matched easily
     evalToPair :: Expr -> Expr -> Interpreter (Result, Result)
     evalToPair a b = (,) <$> eval a <*> eval b
-
-    evalWhile :: Expr -> Block -> Interpreter Result
-    evalWhile condition body = do
-        eval condition >>= \case
-            ResBool continue -> if continue
-                then evalBlock body >> evalWhile condition body
-                else pure ResUnit
-            err ->
-                fail
-                    $  "Loop predicate must evaluate to boolean value, got "
-                    <> (T.unpack . display) err
 
     evalFnCall :: Identifier -> [Expr] -> Interpreter Result
     evalFnCall fnName args = do

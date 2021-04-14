@@ -183,9 +183,6 @@ loop = Loop <$ symbol "loop" <*> block
 whileLoop :: Parser Expr
 whileLoop = While <$ symbol "while" <*> expression <*> block
 
-breakExpr :: Parser Expr
-breakExpr = Break <$ symbol "break" <*> option Unit expression
-
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
 type_ = lexeme . label "type" $ do
@@ -214,19 +211,39 @@ statement =
         <|> try itemStatement
         <|> try letStatement
         <|> try returnStatement
+        <|> try breakStatement
         <|> try statementExpr
-  where
-    emptyStatement = StatementEmpty <$ symbol ";"
-    itemStatement  = StatementItem <$> item
-    statementExpr  = StatementExpr <$> expression <* symbol ";"
-    returnStatement =
-        StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
-    letStatement =
-        StatementLet
-            <$> (symbol "let" *> identifier)
-            <*> (symbol ":" *> type_)
-            <*> (symbol "=" *> expression)
-            <*  symbol ";"
+
+emptyStatement :: Parser Statement
+emptyStatement = StatementEmpty <$ symbol ";"
+
+itemStatement :: Parser Statement
+itemStatement = StatementItem <$> item
+
+statementExpr :: Parser Statement
+statementExpr = do
+    e <- expression >>= \case
+        -- Some expression statmenents don't have to end with a semicolon
+        l@(Loop _   ) -> l <$ optional (symbol ";")
+        w@(While _ _) -> w <$ optional (symbol ";")
+        e             -> e <$ symbol ";"
+    pure $ StatementExpr e
+
+returnStatement :: Parser Statement
+returnStatement =
+    StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
+
+letStatement :: Parser Statement
+letStatement =
+    StatementLet
+        <$> (symbol "let" *> identifier)
+        <*> (symbol ":" *> type_)
+        <*> (symbol "=" *> expression)
+        <*  symbol ";"
+
+breakStatement :: Parser Statement
+breakStatement =
+    StatementBreak <$ symbol "break" <*> option Unit expression <* symbol ";"
 
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.

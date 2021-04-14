@@ -45,6 +45,7 @@ data Statement
     | StatementExpr Expr
     | StatementLet Identifier Type Expr
     | StatementReturn (Maybe Expr)
+    | StatementBreak Expr
     deriving (Show, Eq)
 
 data Expr
@@ -82,7 +83,6 @@ data Expr
     -- Assignment
     | Expr := Expr
     -- Misc
-    | Break Expr
     | FnCall Identifier [Expr]
     | ArrayAccess Expr Expr
     deriving (Show, Eq)
