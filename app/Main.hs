@@ -33,15 +33,15 @@ main = do
     args <- getArgs
     case getOpt RequireOrder options args of
         ([Help], _, []) -> putStrLn $ usageInfo "Krapu interpreter" options
-        ([ParseOnly], []   , []  ) -> parseAst "stdin" stdin
-        ([ParseOnly], [src], []  ) -> withFile src ReadMode (parseAst src)
-        ([Interpret], []   , []  ) -> run "stdin" stdin
-        ([Interpret], [src], []  ) -> withFile src ReadMode (run src)
-        ([Repl     ], []   , []  ) -> fail "not implemented"
-        ([Repl     ], [src], []  ) -> fail "not implemented"
-        ([]         , []   , []  ) -> run "stdin" stdin
-        ([]         , [src], []  ) -> withFile src ReadMode (run src)
-        (flags      , srcs , errs) -> do
+        ([ParseOnly], [], []) -> parseAst "stdin" stdin
+        ([ParseOnly], [src], []) -> withFile src ReadMode (parseAst src)
+        ([Interpret], [], []) -> run "stdin" [] stdin
+        ([Interpret], (src : args), []) -> withFile src ReadMode (run src args)
+        ([Repl], [], []) -> fail "not implemented"
+        ([Repl], [src], []) -> fail "not implemented"
+        ([], [], []) -> run "stdin" [] stdin
+        ([], (src : args), []) -> withFile src ReadMode (run src args)
+        (flags, srcs, errs) -> do
             let plural = if length errs > 1 then "s" else ""
             putStrLn $ "Error" <> plural <> " parsing command line arguments:"
             when (length flags > 1)
@@ -61,8 +61,8 @@ parseAst src handle = do
     either (const exitFailure . T.putStrLn) T.putStrLn
         =<< pure (parseProgram src content)
 
-run :: String -> Handle -> IO ()
-run src handle = do
+run :: String -> [String] -> Handle -> IO ()
+run src args handle = do
     content <- T.hGetContents handle
-    either printParseError runProgram =<< pure (parseCrate src content)
+    either printParseError (runProgram args) =<< pure (parseCrate src content)
     where printParseError err = T.putStrLn err >> exitFailure

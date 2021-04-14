@@ -55,6 +55,9 @@ betweenParens = between (symbol "(") (symbol ")")
 betweenBraces :: Parser a -> Parser a
 betweenBraces = between (symbol "{") (symbol "}")
 
+betweenBrackets :: Parser a -> Parser a
+betweenBrackets = between (symbol "[") (symbol "]")
+
 -- | Reserved words of the language. These cannot be used as identifiers.
 reservedWords :: Set Text
 reservedWords =
@@ -67,8 +70,8 @@ booleanLiteral =
 -- | Parse integer literal. Supports different bases 
 -- (decimal, binary, octal, hexadecimal).
 integerLiteral :: Parser Expr
-integerLiteral = fmap IntLit . lexeme . label "integer literal" $ do
-    nonDefaultBase <|> base10
+integerLiteral =
+    fmap IntLit . lexeme . label "integer literal" $ nonDefaultBase <|> base10
   where
     base10         = Lex.signed spaceConsumer (lexeme Lex.decimal)
     nonDefaultBase = choice (chunk <$> ["0b", "0o", "0x"]) >>= \case
@@ -109,7 +112,12 @@ operatorTable =
 
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
-literal = integerLiteral <|> try booleanLiteral <|> unitLiteral <|> strLiteral
+literal =
+    integerLiteral
+        <|> try booleanLiteral
+        <|> unitLiteral
+        <|> strLiteral
+        <|> arrayLiteral
 
 -- | Parse literal unit, @()@
 unitLiteral :: Parser Expr
@@ -123,16 +131,33 @@ strLiteral = Str . T.pack <$ char '"' <*> Lex.charLiteral `manyTill` char '"'
 variable :: Parser Expr
 variable = Var <$> identifier
 
+-- | Parse an array literal
+--
+-- >>> parse arrayLiteral "" "[1, 2 /* */, 1 + 2]"
+-- Right (ArrayLit [IntLit 1,IntLit 2,IntLit 1 :+ IntLit 2])
+arrayLiteral :: Parser Expr
+arrayLiteral = ArrayLit <$> betweenBrackets (expression `sepBy` symbol ",")
+
 -- | Parses terms that can be used in expressions
 term :: Parser Expr
-term =
-    betweenParens expression
+term = do
+    -- This parser had to be written in this kind of unfortunate way because of 
+    -- left recursion introduced by array access
+    first <-
+        betweenParens expression
         <|> ifExpr
         <|> blockExpr
+        <|> whileLoop
+        <|> loop
         <|> literal
         <|> try functionCall
         <|> variable
         <?> "term"
+    many (betweenBrackets expression) >>= \case
+        []       -> pure first
+        [index ] -> pure $ ArrayAccess first index
+        -- Ok ok, this feels way too hacky but works so far
+        (i : is) -> pure $ foldl ArrayAccess (ArrayAccess first i) is
 
 -- | Parses an expression
 expression :: Parser Expr
@@ -140,7 +165,7 @@ expression = Expr.makeExprParser term operatorTable <?> "expression"
 
 -- | Parse an if-else-expression, else is optional.
 ifExpr :: Parser Expr
-ifExpr = do
+ifExpr =
     IfExpr
         <$> ((:) <$> ifBranch <*> many (try elseIfBranch))
         <*> optional elseBranch
@@ -157,9 +182,6 @@ loop = Loop <$ symbol "loop" <*> block
 
 whileLoop :: Parser Expr
 whileLoop = While <$ symbol "while" <*> expression <*> block
-
-breakExpr :: Parser Expr
-breakExpr = Break <$ symbol "break" <*> option Unit expression
 
 -- | Parse a type identifier (starts with upper case letter)
 type_ :: Parser Type
@@ -189,19 +211,39 @@ statement =
         <|> try itemStatement
         <|> try letStatement
         <|> try returnStatement
+        <|> try breakStatement
         <|> try statementExpr
-  where
-    emptyStatement = StatementEmpty <$ symbol ";"
-    itemStatement  = StatementItem <$> item
-    statementExpr  = StatementExpr <$> expression <* symbol ";"
-    returnStatement =
-        StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
-    letStatement =
-        StatementLet
-            <$> (symbol "let" *> identifier)
-            <*> (symbol ":" *> type_)
-            <*> (symbol "=" *> expression)
-            <*  symbol ";"
+
+emptyStatement :: Parser Statement
+emptyStatement = StatementEmpty <$ symbol ";"
+
+itemStatement :: Parser Statement
+itemStatement = StatementItem <$> item
+
+statementExpr :: Parser Statement
+statementExpr = do
+    e <- expression >>= \case
+        -- Some expression statmenents don't have to end with a semicolon
+        l@(Loop _   ) -> l <$ optional (symbol ";")
+        w@(While _ _) -> w <$ optional (symbol ";")
+        e             -> e <$ symbol ";"
+    pure $ StatementExpr e
+
+returnStatement :: Parser Statement
+returnStatement =
+    StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
+
+letStatement :: Parser Statement
+letStatement =
+    StatementLet
+        <$> (symbol "let" *> identifier)
+        <*> (symbol ":" *> type_)
+        <*> (symbol "=" *> expression)
+        <*  symbol ";"
+
+breakStatement :: Parser Statement
+breakStatement =
+    StatementBreak <$ symbol "break" <*> option Unit expression <* symbol ";"
 
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.
@@ -210,8 +252,7 @@ block = betweenBraces $ Block <$> many statement <*> option Unit expression
 
 -- | Parse a function call
 functionCall :: Parser Expr
-functionCall = do
-    FnCall <$> identifier <*> argList
+functionCall = FnCall <$> identifier <*> argList
     where argList = betweenParens (expression `sepBy` symbol ",")
 
 -- | Parse a function declaration. Return type may be omitted.

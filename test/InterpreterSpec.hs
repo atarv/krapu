@@ -1,10 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
 
-module InterpreterSpec
-    ( spec
-    )
-where
+module InterpreterSpec (spec) where
 
 import           Control.Monad.State.Strict
 import           Data.IORef
@@ -26,14 +23,11 @@ exampleEnv = do
     bar  <- newIORef $ ResInt 42
     baz  <- newIORef $ ResBool False
     foo2 <- newIORef $ ResBool True
-    pure $ Env
-        (NonEmpty.fromList
+    let exampleSyms = NonEmpty.fromList
             [ Map.fromList [(Identifier "foo", foo), (Identifier "bar", bar)]
             , Map.fromList [(Identifier "baz", baz), (Identifier "foo", foo2)]
             ]
-        )
-        exampleFnDefs
-        Nothing
+    pure $ emptyEnv { symTable = exampleSyms, fnDefs = exampleFnDefs }
 
 exampleFnDefs :: FnDefs
 exampleFnDefs = Map.fromList [min] :| []
@@ -244,3 +238,27 @@ spec = do
                         ]
                     )
             in  idempotent `shouldReturn` ResStr (T.pack $ show x)
+
+    describe "Break statment" $ do
+        it "should terminate the loop and return with its expression's value"
+            $ let
+                  breakLoop = usingEnv (pure emptyEnv) $ do
+                      execStatement
+                          (StatementLet
+                              (Identifier "l")
+                              (Type "I64")
+                              (Loop (Block [StatementBreak $ IntLit 1] Unit))
+                          )
+                      lookupVar (Identifier "l")
+              in  breakLoop `shouldReturn` ResInt 1
+        it "should throw an error if used outside of a loop (i.e. function)"
+            $ let errBreak = usingEnv (pure emptyEnv) $ do
+                      execStatement
+                          (StatementItem $ Function
+                              (Identifier "brk")
+                              []
+                              (Type "Unit")
+                              (Block [StatementBreak Unit] Unit)
+                          )
+                      eval (FnCall (Identifier "brk") [])
+              in  errBreak `shouldThrow` anyException

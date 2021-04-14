@@ -1,0 +1,24 @@
+fn main() {
+    loop {
+        let i: I64 = 0;
+        // Loops may be used as expressions
+        let j: I64 = loop {
+            i = i + 1;
+            println("This should print 3 times");
+            if i > 2 {
+                break i + 1;
+            }
+        } + loop { 
+            i = i + 1;
+            if i > 10 { 
+                break i;
+            } 
+        };
+
+        println(i64_to_str(j));
+        println("Loop should be exited after this");
+        break;
+        println("this shouldn't print");
+    }
+    println("Loop exited")
+}

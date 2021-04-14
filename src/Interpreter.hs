@@ -7,18 +7,19 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 -}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE TupleSections     #-}
 
 module Interpreter where
 
 import           Control.Monad
 import           Control.Monad.State.Strict
+import           Control.Monad.Except
+import           Data.Array.IO
 import           Data.IORef
-import           Data.List                      ( intercalate )
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
 import           Data.Map.Strict                ( Map )
+import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
@@ -38,7 +39,22 @@ data Result
     | ResInt Integer
     | ResBool Bool
     | ResStr Text
-    deriving (Show, Eq, Ord)
+    | ResArr (IOArray Integer Result)
+    deriving (Eq)
+
+instance Show Result where
+    show ResUnit       = "()"
+    show (ResInt  i  ) = show i
+    show (ResBool b  ) = show b
+    show (ResStr  str) = show str
+    show (ResArr  _  ) = "[array]"
+
+instance Ord Result where
+    compare ResUnit     ResUnit     = EQ
+    compare (ResInt  a) (ResInt  b) = compare a b
+    compare (ResBool p) (ResBool q) = compare p q
+    compare (ResStr  s) (ResStr  t) = compare s t
+    compare _           _           = undefined -- TODO:
 
 -- | Symbol table holds variables and their values
 type SymTable = NonEmpty (Map Identifier (IORef Result))
@@ -56,23 +72,24 @@ data Env =
         , fnDefs :: FnDefs -- ^ Function definitions
         , returning :: Maybe Result -- ^ If set, the value that is being 
                                     -- returned from function
+        , breaking :: Maybe Result  -- ^ If set, this value is being returned 
+                                    -- from a loop
+        , breakContext :: NonEmpty Bool -- ^ If the head of list is true, break
+                                        -- statements are allowed
         }
 
 type Interpreter a = StateT Env IO a
 
 -- | Convert a result value to text in format the user should see it.
 display :: Result -> Text
-display = \case
-    ResUnit     -> "()"
-    ResInt  i   -> T.pack $ show i
-    ResBool b   -> T.pack $ show b
-    ResStr  str -> "\"" <> str <> "\""
+display = T.pack . show
 
 -- * Environment handling
 
 -- | Creates a blank environment
 emptyEnv :: Env
-emptyEnv = Env (Map.empty :| []) (Map.empty :| []) Nothing
+emptyEnv =
+    Env (Map.empty :| []) (Map.empty :| []) Nothing Nothing (False :| [])
 
 -- | @findVarRef e i@ Find reference to value of the variable which identifier 
 -- @i@ refers to (in environment @e@).
@@ -86,12 +103,16 @@ lookIdentifier idf vars found = case Map.lookup idf vars of
 
 -- | Lookup a variable's value. Fails if variable is not defined yet.
 lookupVar :: Identifier -> Interpreter Result
-lookupVar idf = do
-    findVarRef idf >>= \case
-        Just valRef -> liftIO $ readIORef valRef
-        Nothing ->
-            let (Identifier var) = idf
-            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+lookupVar idf = findVarRef idf >>= \case
+    Just valRef -> liftIO $ readIORef valRef
+    Nothing ->
+        let (Identifier var) = idf
+        in  fail $ "Variable '" <> T.unpack var <> "' not found"
+
+-- | @onHeadOf f xs@ returns the list @xs@ with function @f@ applied on it's 
+-- first element.
+onHeadOf :: (a -> a) -> NonEmpty a -> NonEmpty a
+onHeadOf fn (x :| xs) = fn x :| xs
 
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.
@@ -99,19 +120,17 @@ defineVar :: Identifier -> Result -> Interpreter ()
 defineVar idf val = do
     valRef <- liftIO $ newIORef val
     env    <- get
-    put $ env { symTable = addVar valRef (symTable env) }
-    where addVar valRef (ctx :| ctxs) = Map.insert idf valRef ctx :| ctxs
+    put $ env { symTable = Map.insert idf valRef `onHeadOf` symTable env }
 
 -- | Assign value to variable
 assignVar :: Identifier -> Result -> Interpreter Result
-assignVar idf val = do
-    findVarRef idf >>= \case
-        Just valRef -> liftIO $ do
-            modifyIORef' valRef (const val)
-            readIORef valRef
-        Nothing ->
-            let (Identifier var) = idf
-            in  fail $ "Variable '" <> T.unpack var <> "' not found"
+assignVar idf val = findVarRef idf >>= \case
+    Just valRef -> liftIO $ do
+        modifyIORef' valRef (const val)
+        readIORef valRef
+    Nothing ->
+        let (Identifier var) = idf
+        in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
 -- | Add item definition to environment
 defineItem :: Item -> Interpreter ()
@@ -120,15 +139,17 @@ defineItem = \case
         -- First check that there isn't already a function with same identifier
         -- in current context. Shadowing functions in outer scopes is allowed.
         env <- get
-        maybe addDefinition (errAlreadyDefined identifier)
+        maybe addDefinition (const $ errAlreadyDefined identifier)
             $ Map.lookup identifier (NonEmpty.head (fnDefs env))
       where
-        addDefinition = modify' $ \env ->
-            let (ctx :| ctxs) = fnDefs env
-                newFnDef      = FnDef (fmap fst params) body
-                updatedDefs   = Map.insert identifier newFnDef ctx :| ctxs
-            in  env { fnDefs = updatedDefs }
-        errAlreadyDefined (Identifier idf) _ =
+        newFnDef = FnDef (fmap fst params) body
+        addDefinition =
+            modify'
+                $ \env -> env
+                      { fnDefs = Map.insert identifier newFnDef
+                                     `onHeadOf` fnDefs env
+                      }
+        errAlreadyDefined (Identifier idf) =
             fail $ "function '" <> T.unpack idf <> "' is already defined"
 
 -- | Lookup function definition from environment
@@ -166,6 +187,21 @@ setReturn val = modify' (\env -> env { returning = Just val })
 clearReturn :: Interpreter ()
 clearReturn = modify' (\env -> env { returning = Nothing })
 
+-- | Clear the value loop is breaked with
+clearBreak :: Interpreter ()
+clearBreak = modify' $ \env -> env { breaking = Nothing }
+
+-- | Execute given action with break statement allowed (@True@) or disallowed 
+-- (@False@).
+withBreakAllowed :: Bool -> Interpreter a -> Interpreter a
+withBreakAllowed bool action = do
+    modify' $ \env -> env { breakContext = bool <| breakContext env }
+    result <- action
+    modify' $ \env -> env
+        { breakContext = NonEmpty.fromList . NonEmpty.tail $ breakContext env
+        }
+    pure result
+
 -- | Print environment starting from the innermost context
 printEnv :: Interpreter ()
 printEnv = do
@@ -179,13 +215,21 @@ printEnv = do
     showValVarPairs = Map.foldMapWithKey
         (\(Identifier idf) valRef -> do
             val <- liftIO $ readIORef valRef
-            return $ idf <> " = " <> display val <> "\n"
+            case val of
+                ResArr arr -> do
+                    elems <- displayArray arr
+                    return $ mconcat [idf, " = ", elems, "\n"]
+                _ -> return $ idf <> " = " <> display val <> "\n"
         )
     showFnDefs = Map.foldMapWithKey
         (\(Identifier idf) (FnDef params _) ->
             mconcat ["fn ", idf, "(", commaSep params, ")\n"]
         )
     commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
+    displayArray :: Ix a => IOArray a Result -> IO Text
+    displayArray arr = do
+        elems <- getElems arr
+        return $ "[" <> T.intercalate ", " (display <$> elems) <> "]"
 
 -- * Interpreting
 
@@ -205,35 +249,50 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
-execStatement stmt = gets returning >>= \case
-    Nothing -> case stmt of
-        StatementEmpty              -> pure ()
-        StatementExpr expr          -> void $ eval expr
-        -- Items should be added to environment using 'addItem' before executing
-        StatementItem _             -> pure ()
-        StatementLet idf _type expr -> eval expr >>= defineVar idf
-        StatementReturn expr -> maybe (pure ResUnit) eval expr >>= setReturn
-    -- If function is returning, statements are skipped until function is 
-    -- exited. See 'evalBlock'
-    Just _ -> pure ()
+execStatement stmt =
+    liftM2 (||) (isJust <$> gets returning) (isJust <$> gets breaking) >>= \case
+    -- If function is returning or loop is exited with break, statements are 
+    -- skipped until function and/or loop is exited. See 'evalBlock'
+        True  -> pure ()
+        False -> case stmt of
+            StatementEmpty              -> pure ()
+            StatementExpr expr          -> void $ eval expr
+            -- Items should be added to environment using 'addItem' before executing
+            StatementItem _             -> pure ()
+            StatementLet idf _type expr -> eval expr >>= defineVar idf
+            StatementReturn expr ->
+                maybe (pure ResUnit) eval expr >>= setReturn
+            StatementBreak expr -> eval expr >>= breakWith
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
 addItem (StatementItem item) = defineItem item
 addItem _                    = pure ()
 
+-- | Break from with loop evaluating to given value. This will fail if breaking
+-- is not allowed in current context.
+breakWith :: Result -> Interpreter ()
+breakWith result = do
+    isAllowed <- NonEmpty.head <$> gets breakContext
+    unless isAllowed $ fail "Break statement is only allowed in loops"
+    modify' $ \env -> env { breaking = Just result }
+
 -- | Evaluate an expression. There will always be a result and side effects may
 -- be performed.
 eval :: Expr -> Interpreter Result
 eval = \case
     -- Literals
-    Unit        -> pure ResUnit
-    IntLit  i   -> pure $ ResInt i
-    BoolLit b   -> pure $ ResBool b
-    Str     str -> pure $ ResStr str
+    Unit         -> pure ResUnit
+    IntLit   i   -> pure $ ResInt i
+    BoolLit  b   -> pure $ ResBool b
+    Str      str -> pure $ ResStr str
+    ArrayLit arr -> do
+        elements <- traverse eval arr
+        newArr <- liftIO $ newListArray (0, fromIntegral $ length arr) elements
+        pure $ ResArr newArr
 
     -- Variables
-    Var     idf -> lookupVar idf
+    Var idf     -> lookupVar idf
 
      -- Arithmetic
     lhs :+ rhs  -> binaryIntOp (+) lhs rhs
@@ -255,29 +314,60 @@ eval = \case
         val       -> errUnexpectedType "bool" val
 
      -- Comparison
-    lhs     :<                         rhs -> comparisonOp (<) lhs rhs
-    lhs     :>                         rhs -> comparisonOp (>) lhs rhs
-    lhs     :<=                        rhs -> comparisonOp (<=) lhs rhs
-    lhs     :>=                        rhs -> comparisonOp (>=) lhs rhs
+    lhs     :<  rhs -> comparisonOp (<) lhs rhs
+    lhs     :>  rhs -> comparisonOp (>) lhs rhs
+    lhs     :<= rhs -> comparisonOp (<=) lhs rhs
+    lhs     :>= rhs -> comparisonOp (>=) lhs rhs
 
      -- Equality
-    lhs     :==                        rhs -> equalityOp (==) lhs rhs
-    lhs     :!=                        rhs -> equalityOp (/=) lhs rhs
+    lhs     :== rhs -> equalityOp (==) lhs rhs
+    lhs     :!= rhs -> equalityOp (/=) lhs rhs
 
     -- Variables and assignment
-    Var idf :=                         rhs -> eval rhs >>= assignVar idf
+    Var idf :=  rhs -> eval rhs >>= assignVar idf
+    ArrayAccess (Var idf) indexExpr := expr ->
+        liftM2 (,) (lookupVar idf) (eval indexExpr) >>= \case
+            (ResArr arr, ResInt i) -> do
+                val <- eval expr
+                liftIO $ writeArray arr i val
+                pure val
+            (indexed, index) -> errCannotIndex indexed index
     err := _ -> fail $ "Cannot assign to expression " <> show err
 
     -- Expressions with blocks
-    IfExpr  ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
+    IfExpr ((cond, conseq) : elseIfs) alt -> eval cond >>= \case
         ResBool b -> if b then evalBlock conseq else eval $ IfExpr elseIfs alt
         val       -> errUnexpectedType "bool" val
-    IfExpr [] (Just alt)             -> evalBlock alt
-    IfExpr [] Nothing                -> pure ResUnit
+    IfExpr [] (Just alt) -> evalBlock alt
+    IfExpr [] Nothing    -> pure ResUnit
 
-    ExprBlock block                  -> evalBlock block
-    While condition body             -> evalWhile condition body
-    Loop body                        -> evalWhile (BoolLit True) body
+    ExprBlock block      -> evalBlock block
+    While predicate body -> withBreakAllowed True $ do
+        runExceptT . forever $ do
+            continue <- lift $ eval predicate >>= \case
+                ResBool b -> pure b
+                nonBool ->
+                    fail
+                        $  "Loop predicate must evaluate to boolean value, got "
+                        <> (T.unpack . display) nonBool
+            unless continue $ throwError () -- exit loop
+            gets breaking >>= \case
+                Nothing      -> void . lift $ evalBlock body
+                Just ResUnit -> throwError () -- exit loop
+                Just val ->
+                    fail
+                        .  T.unpack
+                        $  "Cannot break while loop with a non-unit value: "
+                        <> display val
+        ResUnit <$ clearBreak
+    Loop body -> withBreakAllowed True $ do
+        result <- runExceptT . forever $ gets breaking >>= \case
+            Nothing  -> void . lift $ evalBlock body
+            Just val -> throwError val
+        case result of
+            Left val -> val <$ clearBreak
+            Right () ->
+                fail "Loop was exited without break. This shouldn't happen."
 
     -- Function calls and primitive functions
     FnCall (Identifier "debug") args -> do
@@ -307,10 +397,17 @@ eval = \case
             ResStr str -> pure . ResInt . read $ T.unpack str
             err        -> errUnexpectedType "str" err
         args -> errWrongArgumentCount (Identifier "str_to_i64") 1 (length args)
-    FnCall fnName args -> evalFnCall fnName args
+    FnCall fnName args -> withBreakAllowed False $ evalFnCall fnName args
 
     -- Misc
-    Break _expr        -> fail "break not implemented"
+    ArrayAccess exprIndexed exprIndex ->
+        liftM2 (,) (eval exprIndexed) (eval exprIndex) >>= \case
+            (ResArr arr, ResInt index) -> do
+                bounds <- liftIO $ getBounds arr
+                unless (inRange bounds index) . fail $ mconcat
+                    ["Index ", show index, " out of bounds ", show bounds]
+                liftIO $ readArray arr index
+            (indexed, index) -> errCannotIndex indexed index
   where
     binaryIntOp op lhs rhs = evalToPair lhs rhs >>= \case
         (ResInt l, ResInt r) -> pure $ ResInt (l `op` r)
@@ -319,43 +416,37 @@ eval = \case
         (ResBool l, ResBool r) -> pure $ ResBool (l `op` r)
         (l        , r        ) -> typeMismatch l r
     comparisonOp op lhs rhs = evalToPair lhs rhs >>= \case
-        (l@(ResInt _), r@(ResInt _)) -> pure $ ResBool (l `op` r)
-        (l           , r           ) -> typeMismatch l r
+        (l@(ResInt  _), r@(ResInt _) ) -> pure $ ResBool (l `op` r)
+        (l@(ResBool _), r@(ResBool _)) -> pure $ ResBool (l `op` r)
+        (l@(ResStr  _), r@(ResStr _) ) -> pure $ ResBool (l `op` r)
+        (l            , r            ) -> typeMismatch l r
     equalityOp op lhs rhs = evalToPair lhs rhs >>= \case
         (l@(ResBool _), r@(ResBool _)) -> pure $ ResBool (l `op` r)
         (l@(ResInt  _), r@(ResInt _) ) -> pure $ ResBool (l `op` r)
         (l@ResUnit    , r@ResUnit    ) -> pure $ ResBool (l `op` r)
-        (l            , r            ) -> typeMismatch l r
+        (l@(ResStr _) , r@(ResStr _) ) -> pure $ ResBool (l `op` r)
+        (l, r) -> fail $ mconcat ["Cannot compare ", show l, " and ", show r]
     typeMismatch lhs rhs =
         fail $ concat ["Type mismatch: ", show lhs, ", ", show rhs]
     errUnexpectedType expected value =
         fail $ concat
             ["Unexpected type: expected ", expected, ", got ", show value]
+    errCannotIndex indexed index =
+        fail $ mconcat ["Cannot use ", show index, "to index ", show indexed]
 
     errWrongArgumentCount :: Identifier -> Int -> Int -> Interpreter Result
-    errWrongArgumentCount (Identifier fnName) expected got = fail $ mconcat
+    errWrongArgumentCount (Identifier fnName) expected actual = fail $ mconcat
         [ "Function '"
         , T.unpack fnName
         , "' expected "
         , show expected
         , " arguments, got "
-        , show got
+        , show actual
         ]
 
     -- Evaluate two expressions to a pair so they can be pattern matched easily
     evalToPair :: Expr -> Expr -> Interpreter (Result, Result)
     evalToPair a b = (,) <$> eval a <*> eval b
-
-    evalWhile :: Expr -> Block -> Interpreter Result
-    evalWhile condition body = do
-        eval condition >>= \case
-            ResBool continue -> if continue
-                then evalBlock body >> evalWhile condition body
-                else pure ResUnit
-            err ->
-                fail
-                    $  "Loop predicate must evaluate to boolean value, got "
-                    <> (T.unpack . display) err
 
     evalFnCall :: Identifier -> [Expr] -> Interpreter Result
     evalFnCall fnName args = do
@@ -374,7 +465,12 @@ eval = \case
             evalBlock body <* clearReturn
 
 -- | Run the main program of the crate. Fails if main is not defined.
-runProgram :: Crate -> IO ()
-runProgram (Crate items) = void $ flip execStateT emptyEnv $ do
+runProgram :: [String] -> Crate -> IO ()
+runProgram args (Crate items) = void $ flip execStateT emptyEnv $ do
     mapM_ defineItem items
+    -- Define argument count and argument values implicitly as global variables
+    let argc = fromIntegral $ length args
+    argv <- liftIO $ newListArray (0, argc - 1) (ResStr . T.pack <$> args)
+    defineVar (Identifier "argc") (ResInt argc)
+    defineVar (Identifier "argv") (ResArr argv)
     eval (FnCall (Identifier "main") [])

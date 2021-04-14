@@ -45,15 +45,16 @@ data Statement
     | StatementExpr Expr
     | StatementLet Identifier Type Expr
     | StatementReturn (Maybe Expr)
+    | StatementBreak Expr
     deriving (Show, Eq)
 
--- | Expressions always produce a value and may perform side effects
 data Expr
     -- Literals
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
     | Str Text
+    | ArrayLit [Expr]
     -- Variables
     | Var Identifier
     -- Arithmetic
@@ -82,6 +83,6 @@ data Expr
     -- Assignment
     | Expr := Expr
     -- Misc
-    | Break Expr
     | FnCall Identifier [Expr]
+    | ArrayAccess Expr Expr
     deriving (Show, Eq)

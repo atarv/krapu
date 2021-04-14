@@ -34,7 +34,7 @@ runExample program = it program $ do
             source <- T.readFile (testDir <> program)
             case parseCrate program source of
                 Left  err   -> fail $ T.unpack err
-                Right crate -> runProgram crate
+                Right crate -> runProgram ["42", "1337"] crate
     run `shouldReturn` ()
 
 spec :: Spec
