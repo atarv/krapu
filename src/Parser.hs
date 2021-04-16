@@ -63,6 +63,11 @@ reservedWords :: Set Text
 reservedWords =
     Set.fromList ["else", "fn", "if", "let", "while", "break", "loop"]
 
+-- | @isReserved sym@ tells whether text @sym@ is a reserved word of the 
+-- language
+isReserved :: Text -> Bool
+isReserved sym = Set.member sym reservedWords
+
 booleanLiteral :: Parser Expr
 booleanLiteral =
     (BoolLit False <$ symbol "false") <|> (BoolLit True <$ symbol "true")
@@ -196,9 +201,9 @@ identifier = lexeme . label "identifier" $ do
     initial <- lowerChar <|> single '_'
     rest    <- many (alphaNumChar <|> single '_')
     let idf = T.singleton initial <> T.pack rest
-    if idf `Set.notMember` reservedWords
-        then pure $ Identifier idf
-        else fail "keywords cannot be used as identifiers"
+    if isReserved idf
+        then fail "keywords cannot be used as identifiers"
+        else pure $ Identifier idf
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter
@@ -231,7 +236,7 @@ statementExpr = do
 
 returnStatement :: Parser Statement
 returnStatement =
-    StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
+    StatementReturn <$ symbol "return" <*> option Unit expression <* symbol ";"
 
 letStatement :: Parser Statement
 letStatement =
@@ -278,7 +283,8 @@ item = functionDeclaration
 crate :: Parser Crate
 crate = between spaceConsumer eof $ Crate <$> some item
 
--- | Parse a crate. Parse error is converted to text.
+-- | Parse a crate. Parse error is converted to text. First argument is the 
+-- source file name, which is displayed on error.
 parseCrate :: String -> Text -> Either Text Crate
 parseCrate src content =
     first (T.pack . errorBundlePretty) $ parse crate src content
@@ -288,3 +294,9 @@ parseCrate src content =
 parseProgram :: String -> Text -> Either Text Text
 parseProgram src content =
     bimap (T.pack . errorBundlePretty) (T.pack . show) $ parse crate src content
+
+-- | Parse a statement. Error is converted to text. First argument is the 
+-- source file name, which is displayed on error.
+parseStatement :: String -> Text -> Either Text Statement
+parseStatement src content =
+    first (T.pack . errorBundlePretty) $ parse statement src content

@@ -133,19 +133,19 @@ spec = do
                         (ExprBlock $ Block [] (Var $ Identifier "x"))
                     )
             testOuterContext `shouldReturn` ResInt 2
-        it "variables defined in exited scopes shouldn't be available" $ do
-            let accessInnerScope = usingExampleEnv $ evalBlock
-                    (Block
-                        [ StatementExpr $ ExprBlock $ Block
-                              [ StatementLet (Identifier "x")
-                                             (Type "I64")
-                                             (IntLit 2)
-                              ]
-                              Unit
-                        ]
-                        (ExprBlock $ Block [] (Var $ Identifier "x"))
-                    )
-            accessInnerScope `shouldThrow` anyException
+        it "should fail if trying to access that was in an exited scope"
+            $ let accessInnerScope = usingExampleEnv $ evalBlock
+                      (Block
+                          [ StatementExpr $ ExprBlock $ Block
+                                [ StatementLet (Identifier "x")
+                                               (Type "I64")
+                                               (IntLit 2)
+                                ]
+                                Unit
+                          ]
+                          (ExprBlock $ Block [] (Var $ Identifier "x"))
+                      )
+              in  accessInnerScope `shouldThrow` anyException
 
     describe "Assignment expression" $ do
         it "sets variable's value" $ do
@@ -184,8 +184,8 @@ spec = do
                     lookupVar (Identifier "foo")
             lookupFoo `shouldReturn` ResInt 13
 
-    describe "Function calls" $ do
-        it "succeed when supplied correct number of arguments" $ do
+    describe "Function call" $ do
+        it "succeeds when supplied correct number of arguments" $ do
             let
                 fnCall =
                     usingExampleEnv $ eval
@@ -204,16 +204,17 @@ spec = do
             $ let fnCallNotFound =
                       usingExampleEnv $ eval (FnCall (Identifier "föö") [])
               in  fnCallNotFound `shouldThrow` anyException
-        it "work with early return"
-            $ let earlyRet = usingExampleEnv $ do
+        it "works with early return"
+            $ let
+                  earlyRet = usingExampleEnv $ do
                       defineItem
                           (Function
                               (Identifier "f")
                               []
                               (Type "I64")
                               (Block
-                                  [ StatementReturn (Just $ IntLit 1)
-                                  , StatementReturn (Just $ IntLit 2)
+                                  [ StatementReturn (IntLit 1)
+                                  , StatementReturn (IntLit 2)
                                   ]
                                   (IntLit 3)
                               )
@@ -239,7 +240,7 @@ spec = do
                     )
             in  idempotent `shouldReturn` ResStr (T.pack $ show x)
 
-    describe "Break statment" $ do
+    describe "Break statement" $ do
         it "should terminate the loop and return with its expression's value"
             $ let
                   breakLoop = usingEnv (pure emptyEnv) $ do

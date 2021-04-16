@@ -228,8 +228,11 @@ printEnv = do
     commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
     displayArray :: Ix a => IOArray a Result -> IO Text
     displayArray arr = do
-        elems <- getElems arr
-        return $ "[" <> T.intercalate ", " (display <$> elems) <> "]"
+        elems <- mapM display' =<< getElems arr
+        return $ "[" <> T.intercalate ", " elems <> "]"
+    display' :: Result -> IO Text
+    display' (ResArr arr) = displayArray arr
+    display' res          = pure $ display res
 
 -- * Interpreting
 
@@ -260,9 +263,8 @@ execStatement stmt =
             -- Items should be added to environment using 'addItem' before executing
             StatementItem _             -> pure ()
             StatementLet idf _type expr -> eval expr >>= defineVar idf
-            StatementReturn expr ->
-                maybe (pure ResUnit) eval expr >>= setReturn
-            StatementBreak expr -> eval expr >>= breakWith
+            StatementReturn expr        -> eval expr >>= setReturn
+            StatementBreak  expr        -> eval expr >>= breakWith
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
@@ -288,7 +290,8 @@ eval = \case
     Str      str -> pure $ ResStr str
     ArrayLit arr -> do
         elements <- traverse eval arr
-        newArr <- liftIO $ newListArray (0, fromIntegral $ length arr) elements
+        newArr   <- liftIO
+            $ newListArray (0, fromIntegral $ length arr - 1) elements
         pure $ ResArr newArr
 
     -- Variables
@@ -466,11 +469,28 @@ eval = \case
 
 -- | Run the main program of the crate. Fails if main is not defined.
 runProgram :: [String] -> Crate -> IO ()
-runProgram args (Crate items) = void $ flip execStateT emptyEnv $ do
+runProgram args crate = void $ flip execStateT emptyEnv $ do
+    initProgram args crate
+    eval (FnCall (Identifier "main") [])
+
+-- | Initialize the program state
+initProgram :: [String] -> Crate -> Interpreter ()
+initProgram args (Crate items) = do
     mapM_ defineItem items
     -- Define argument count and argument values implicitly as global variables
     let argc = fromIntegral $ length args
     argv <- liftIO $ newListArray (0, argc - 1) (ResStr . T.pack <$> args)
     defineVar (Identifier "argc") (ResInt argc)
     defineVar (Identifier "argv") (ResArr argv)
-    eval (FnCall (Identifier "main") [])
+
+-- | Run a very bare bones REPL constantly asking for statements to execute. 
+-- Not much of a P currently since it doesn't print anything, but user can call
+-- the primitive functions to inspect program state.
+runRepl :: [String] -> IO Statement -> IO ()
+runRepl args prompt = void $ flip execStateT emptyEnv $ do
+    initProgram args (Crate [])
+    forever $ do
+        stmt <- liftIO prompt
+        flip catchError (liftIO . print) $ do
+            addItem stmt
+            execStatement stmt
