@@ -14,14 +14,14 @@
 
 ### Pakolliset ominaisuudet (3op):
 
-- [ ] lukukelpoinen (ei binäärimössöä)
-- [ ] kommentit
-- [ ] kokonaislukuaritmetiikka (infix-syntaksilla) 
-- [ ] valintojen tekeminen (if)
-- [ ] toisto (silmukat)
-- [ ] muuttujat
-- [ ] jonkinlainen syötteen välitys vähintään ohjelman alussa, esim. muuttujille alkuarvot
-- [ ] jonkinlainen tulostus vähintään ohjelman lopussa, esim. muuttujien loppuarvot
+- [x] lukukelpoinen (ei binäärimössöä)
+- [x] kommentit
+- [x] kokonaislukuaritmetiikka (infix-syntaksilla) 
+- [x] valintojen tekeminen (if)
+- [x] toisto (silmukat)
+- [x] muuttujat
+- [x] jonkinlainen syötteen välitys vähintään ohjelman alussa, esim. muuttujille alkuarvot
+- [x] jonkinlainen tulostus vähintään ohjelman lopussa, esim. muuttujien loppuarvot
 
 Kohdekieli/tulkkityyppi: 
 - tulkki (ilman välikieltä) (0op)
@@ -31,11 +31,11 @@ Tuetut alustat:
 
 ### Suunnitellut lisäominaisuudet:
 
- - [ ] aliohjelmat (0,5op)
-    - [ ] rekursiolla (+0,5op)
+ - [x] aliohjelmat (0,5op)
+    - [x] rekursiolla (+0,5op)
 - [ ] merkkijonosyöte ja -tulostus (0,5op)
 - [ ] tietueet ja variantit (1op)
-- [ ] yksinkertainen staattinen tyypintarkastus (jos aikaa) (1op)
+- [ ] yksinkertainen staattinen tyypintarkastus (1op)
 
 
 ## Työkalut
@@ -78,14 +78,14 @@ Inkrementit
     - aliohjelmat (myös rekursiiviset)
     - välitsekki ohjaajalle 16.4. mennessä
 5. viikot 17-18 (26.4. - 9.5.)
-    - tietueet ja variantit
+    - staattinen tyypitys
     - lisää testejä
     - esimerkkiohjelmia
 6. viikot 19-21 (10.5. - 28.5.)
     - mahdollisesti (/oletettavasti) esiintyvien puutteiden paikkaamista
     - dokumentaation ja testien täydennys
     - viimeiset esimerkkiohjelmat
-    - staattinen tyypitys (jos aikaa)
+    - tietueet ja variantit
     - harjoitustyön palautus 28.5. klo 23.59 mennessä
 
 ## Esimerkkiohjelmia
