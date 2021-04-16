@@ -63,6 +63,11 @@ reservedWords :: Set Text
 reservedWords =
     Set.fromList ["else", "fn", "if", "let", "while", "break", "loop"]
 
+-- | @isReserved sym@ tells whether text @sym@ is a reserved word of the 
+-- language
+isReserved :: Text -> Bool
+isReserved sym = Set.member sym reservedWords
+
 booleanLiteral :: Parser Expr
 booleanLiteral =
     (BoolLit False <$ symbol "false") <|> (BoolLit True <$ symbol "true")
@@ -196,9 +201,9 @@ identifier = lexeme . label "identifier" $ do
     initial <- lowerChar <|> single '_'
     rest    <- many (alphaNumChar <|> single '_')
     let idf = T.singleton initial <> T.pack rest
-    if idf `Set.notMember` reservedWords
-        then pure $ Identifier idf
-        else fail "keywords cannot be used as identifiers"
+    if isReserved idf
+        then fail "keywords cannot be used as identifiers"
+        else pure $ Identifier idf
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter
@@ -231,7 +236,7 @@ statementExpr = do
 
 returnStatement :: Parser Statement
 returnStatement =
-    StatementReturn <$ symbol "return" <*> optional expression <* symbol ";"
+    StatementReturn <$ symbol "return" <*> option Unit expression <* symbol ";"
 
 letStatement :: Parser Statement
 letStatement =

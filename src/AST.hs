@@ -44,7 +44,7 @@ data Statement
     | StatementItem Item
     | StatementExpr Expr
     | StatementLet Identifier Type Expr
-    | StatementReturn (Maybe Expr)
+    | StatementReturn Expr
     | StatementBreak Expr
     deriving (Show, Eq)
 

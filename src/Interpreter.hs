@@ -10,7 +10,6 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Interpreter where
 
-import           Control.Exception
 import           Control.Monad
 import           Control.Monad.State.Strict
 import           Control.Monad.Except
@@ -229,8 +228,11 @@ printEnv = do
     commaSep = T.intercalate ", " . fmap (\(Identifier idf) -> idf)
     displayArray :: Ix a => IOArray a Result -> IO Text
     displayArray arr = do
-        elems <- getElems arr
-        return $ "[" <> T.intercalate ", " (display <$> elems) <> "]"
+        elems <- mapM display' =<< getElems arr
+        return $ "[" <> T.intercalate ", " elems <> "]"
+    display' :: Result -> IO Text
+    display' (ResArr arr) = displayArray arr
+    display' res          = pure $ display res
 
 -- * Interpreting
 
@@ -261,9 +263,8 @@ execStatement stmt =
             -- Items should be added to environment using 'addItem' before executing
             StatementItem _             -> pure ()
             StatementLet idf _type expr -> eval expr >>= defineVar idf
-            StatementReturn expr ->
-                maybe (pure ResUnit) eval expr >>= setReturn
-            StatementBreak expr -> eval expr >>= breakWith
+            StatementReturn expr        -> eval expr >>= setReturn
+            StatementBreak  expr        -> eval expr >>= breakWith
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
@@ -289,7 +290,8 @@ eval = \case
     Str      str -> pure $ ResStr str
     ArrayLit arr -> do
         elements <- traverse eval arr
-        newArr <- liftIO $ newListArray (0, fromIntegral $ length arr) elements
+        newArr   <- liftIO
+            $ newListArray (0, fromIntegral $ length arr - 1) elements
         pure $ ResArr newArr
 
     -- Variables

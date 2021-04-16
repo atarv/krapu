@@ -3,13 +3,12 @@
 module Main where
 
 import           Control.Monad
-import           Control.Exception
+import           Data.Text                      ( Text )
 import           System.Console.GetOpt
 import           System.Environment
 import           System.Exit
 import           System.IO
 
-import           AST
 import           Interpreter
 import           Parser
 
@@ -70,6 +69,7 @@ run src args handle = do
     either printParseError (runProgram args) $ parseCrate src content
     where printParseError err = T.putStrLn err >> exitFailure
 
+prompt :: Text
 prompt = "krapu>"
 
 repl :: [String] -> IO ()
