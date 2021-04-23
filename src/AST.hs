@@ -8,8 +8,15 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 Based on Rust reference <https://doc.rust-lang.org/reference/>, though a lot
 of corners were cut.
 -}
+{-# LANGUAGE DeriveFunctor     #-}
+{-# LANGUAGE DeriveFoldable    #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE TypeFamilies       #-}
+
 module AST where
 
+import           Data.Functor.Foldable.TH       ( makeBaseFunctor )
 import           Data.Text                      ( Text )
 
 
@@ -86,3 +93,6 @@ data Expr
     | FnCall Identifier [Expr]
     | ArrayAccess Expr Expr
     deriving (Show, Eq)
+
+makeBaseFunctor ''Expr
+makeBaseFunctor ''Statement

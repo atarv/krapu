@@ -41,6 +41,7 @@ library
     , containers
     , mtl
     , array
+    , recursion-schemes
   default-language: Haskell2010
 
 executable krapu-exe
