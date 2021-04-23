@@ -189,11 +189,11 @@ whileLoop :: Parser Expr
 whileLoop = While <$ symbol "while" <*> expression <*> block
 
 -- | Parse a type identifier (starts with upper case letter)
-type_ :: Parser Type
-type_ = lexeme . label "type" $ do
+typeName :: Parser TypeName
+typeName = lexeme . label "type" $ do
     initial <- T.singleton <$> upperChar
     rest    <- T.pack <$> many alphaNumChar
-    pure . Type $ initial <> rest
+    pure . TypeName $ initial <> rest
 
 -- | Parse an identifier of other language constructs than types
 identifier :: Parser Identifier
@@ -207,7 +207,7 @@ identifier = lexeme . label "identifier" $ do
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter
-functionParam = (,) <$> identifier <* symbol ":" <*> type_
+functionParam = (,) <$> identifier <* symbol ":" <*> typeName
 
 -- | Parse a statement
 statement :: Parser Statement
@@ -242,7 +242,7 @@ letStatement :: Parser Statement
 letStatement =
     StatementLet
         <$> (symbol "let" *> identifier)
-        <*> (symbol ":" *> type_)
+        <*> (symbol ":" *> typeName)
         <*> (symbol "=" *> expression)
         <*  symbol ";"
 
@@ -271,7 +271,7 @@ functionDeclaration =
         <*> block
   where
     returnType =
-        label "return type" $ option (Type "Unit") $ symbol "->" >> type_
+        label "return type" $ option (TypeName "Unit") $ symbol "->" >> typeName
     paramList =
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
 

@@ -29,6 +29,7 @@ library
       Parser
       AST
       Interpreter
+      Analyzer
   other-modules:
       Paths_krapu
   hs-source-dirs:
