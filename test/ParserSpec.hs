@@ -1,9 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ParserSpec
-    ( spec
-    )
-where
+module ParserSpec (spec) where
 
 import           Data.Char
 import           Data.Text                      ( Text
@@ -130,7 +127,7 @@ spec = do
         it "can be parsed"
             $             parse statement "" "let xyzzy: I64 = 4321 ;"
             `shouldParse` StatementLet (Identifier "xyzzy")
-                                       (Type "I64")
+                                       (TypeName "I64")
                                        (IntLit 4321)
 
     describe "function declarations" $ do
@@ -139,12 +136,12 @@ spec = do
             `shouldParse` Function
                               (Identifier "f")
                               []
-                              (Type "Unit")
+                              (TypeName "Unit")
                               (Block
                                   [ StatementItem $ Function
                                         (Identifier "g")
                                         []
-                                        (Type "Unit")
+                                        (TypeName "Unit")
                                         (Block [] (IntLit 2))
                                   ]
                                   (FnCall (Identifier "g") [])

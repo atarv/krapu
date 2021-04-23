@@ -102,7 +102,7 @@ spec = do
                 usingEnv testEnv $ do
                     execStatement
                         (StatementLet (Identifier "foo")
-                                      (Type "I64")
+                                      (TypeName "I64")
                                       (IntLit 22 :+ IntLit 20)
                         )
                     lookupVar (Identifier "foo")
@@ -129,7 +129,7 @@ spec = do
         it "looks in outer context(s) if variable is not found on current" $ do
             let testOuterContext = usingExampleEnv $ evalBlock
                     (Block
-                        [StatementLet (Identifier "x") (Type "I64") (IntLit 2)]
+                        [StatementLet (Identifier "x") (TypeName "I64") (IntLit 2)]
                         (ExprBlock $ Block [] (Var $ Identifier "x"))
                     )
             testOuterContext `shouldReturn` ResInt 2
@@ -138,7 +138,7 @@ spec = do
                       (Block
                           [ StatementExpr $ ExprBlock $ Block
                                 [ StatementLet (Identifier "x")
-                                               (Type "I64")
+                                               (TypeName "I64")
                                                (IntLit 2)
                                 ]
                                 Unit
@@ -211,7 +211,7 @@ spec = do
                           (Function
                               (Identifier "f")
                               []
-                              (Type "I64")
+                              (TypeName "I64")
                               (Block
                                   [ StatementReturn (IntLit 1)
                                   , StatementReturn (IntLit 2)
@@ -247,7 +247,7 @@ spec = do
                       execStatement
                           (StatementLet
                               (Identifier "l")
-                              (Type "I64")
+                              (TypeName "I64")
                               (Loop (Block [StatementBreak $ IntLit 1] Unit))
                           )
                       lookupVar (Identifier "l")
@@ -258,7 +258,7 @@ spec = do
                           (StatementItem $ Function
                               (Identifier "brk")
                               []
-                              (Type "Unit")
+                              (TypeName "Unit")
                               (Block [StatementBreak Unit] Unit)
                           )
                       eval (FnCall (Identifier "brk") [])

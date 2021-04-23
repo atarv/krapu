@@ -18,6 +18,7 @@ module AST where
 
 import           Data.Functor.Foldable.TH       ( makeBaseFunctor )
 import           Data.Text                      ( Text )
+import           Data.List.NonEmpty             ( NonEmpty )
 
 
 -- | Following terminology of Rust, a crate is a package that compiles to a 
@@ -26,17 +27,17 @@ import           Data.Text                      ( Text )
 newtype Crate = Crate [Item] deriving Show
 
 -- | Type represents type names
-newtype Type = Type Text deriving (Show, Eq, Ord)
+newtype TypeName = TypeName Text deriving (Show, Eq, Ord)
 
 -- | Identifiers are the names of variables, constants, parameters etc.
 newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
-data Item = Function Identifier [Parameter] Type Block deriving (Show, Eq)
+data Item = Function Identifier [Parameter] TypeName Block deriving (Show, Eq)
 
 -- | Function parameter
-type Parameter = (Identifier, Type)
+type Parameter = (Identifier, TypeName)
 
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
@@ -50,7 +51,7 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
-    | StatementLet Identifier Type Expr
+    | StatementLet Identifier TypeName Expr
     | StatementReturn Expr
     | StatementBreak Expr
     deriving (Show, Eq)
