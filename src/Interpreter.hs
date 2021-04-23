@@ -23,6 +23,7 @@ import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
+import Fix
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
@@ -60,16 +61,16 @@ instance Ord Result where
 type SymTable = NonEmpty (Map Identifier (IORef Result))
 
 -- | A single function definition
-data FnDef = FnDef [Identifier] Block
+data FnDef expr = FnDef [Identifier] (Block expr)
 
 -- | Function definitions
-type FnDefs = NonEmpty (Map Identifier FnDef)
+type FnDefs expr = NonEmpty (Map Identifier (FnDef expr))
 
 -- | Environment of the interpreted program. Krapu is block scoped, so function
 -- definitions and symbol tabels are handled in a stack-like way.
-data Env =
+data Env expr =
     Env { symTable :: SymTable -- ^ Variables
-        , fnDefs :: FnDefs -- ^ Function definitions
+        , fnDefs :: FnDefs expr -- ^ Function definitions
         , returning :: Maybe Result -- ^ If set, the value that is being 
                                     -- returned from function
         , breaking :: Maybe Result  -- ^ If set, this value is being returned 
@@ -78,7 +79,7 @@ data Env =
                                         -- statements are allowed
         }
 
-type Interpreter a = StateT Env IO a
+type Interpreter a = StateT (Env Expr) IO a
 
 -- | Convert a result value to text in format the user should see it.
 display :: Result -> Text
@@ -87,7 +88,7 @@ display = T.pack . show
 -- * Environment handling
 
 -- | Creates a blank environment
-emptyEnv :: Env
+emptyEnv :: Env Expr
 emptyEnv =
     Env (Map.empty :| []) (Map.empty :| []) Nothing Nothing (False :| [])
 
@@ -133,7 +134,7 @@ assignVar idf val = findVarRef idf >>= \case
         in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
 -- | Add item definition to environment
-defineItem :: Item -> Interpreter ()
+defineItem :: Item Expr -> Interpreter ()
 defineItem = \case
     Function identifier params _ body -> do
         -- First check that there isn't already a function with same identifier
@@ -153,7 +154,7 @@ defineItem = \case
             fail $ "function '" <> T.unpack idf <> "' is already defined"
 
 -- | Lookup function definition from environment
-lookupFn :: Identifier -> Interpreter FnDef
+lookupFn :: Identifier -> Interpreter (FnDef Expr)
 lookupFn identifier = do
     env <- get
     case foldr (lookIdentifier identifier) Nothing (fnDefs env) of
@@ -238,7 +239,7 @@ printEnv = do
 
 -- | Blocks evaluate to their outer expression's result or the first return 
 -- statement's result.
-evalBlock :: Block -> Interpreter Result
+evalBlock :: Block Expr -> Interpreter Result
 evalBlock (Block stmts outerExpr) = withinNewScope $ do
     mapM_ addItem       stmts
     mapM_ execStatement stmts
@@ -251,7 +252,7 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- | Statements change the program environment (declare new variables and change
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
-execStatement :: Statement -> Interpreter ()
+execStatement :: Statement Expr -> Interpreter ()
 execStatement stmt =
     liftM2 (||) (isJust <$> gets returning) (isJust <$> gets breaking) >>= \case
     -- If function is returning or loop is exited with break, statements are 
@@ -267,7 +268,7 @@ execStatement stmt =
             StatementBreak  expr        -> eval expr >>= breakWith
 
 -- | Add item definition to environment. Other types of statements are ignored.
-addItem :: Statement -> Interpreter ()
+addItem :: Statement Expr -> Interpreter ()
 addItem (StatementItem item) = defineItem item
 addItem _                    = pure ()
 
@@ -284,7 +285,7 @@ breakWith result = do
 eval :: Expr -> Interpreter Result
 eval = \case
     -- Literals
-    Unit         -> pure ResUnit
+    Fix Unit         -> pure ResUnit
     IntLit   i   -> pure $ ResInt i
     BoolLit  b   -> pure $ ResBool b
     Str      str -> pure $ ResStr str
@@ -468,13 +469,13 @@ eval = \case
             evalBlock body <* clearReturn
 
 -- | Run the main program of the crate. Fails if main is not defined.
-runProgram :: [String] -> Crate -> IO ()
+runProgram :: [String] -> Crate Expr -> IO ()
 runProgram args crate = void $ flip execStateT emptyEnv $ do
     initProgram args crate
     eval (FnCall (Identifier "main") [])
 
 -- | Initialize the program state
-initProgram :: [String] -> Crate -> Interpreter ()
+initProgram :: [String] -> Crate Expr -> Interpreter ()
 initProgram args (Crate items) = do
     mapM_ defineItem items
     -- Define argument count and argument values implicitly as global variables
@@ -486,7 +487,7 @@ initProgram args (Crate items) = do
 -- | Run a very bare bones REPL constantly asking for statements to execute. 
 -- Not much of a P currently since it doesn't print anything, but user can call
 -- the primitive functions to inspect program state.
-runRepl :: [String] -> IO Statement -> IO ()
+runRepl :: [String] -> IO (Statement Expr) -> IO ()
 runRepl args prompt = void $ flip execStateT emptyEnv $ do
     initProgram args (Crate [])
     forever $ do

@@ -8,15 +8,23 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 Based on Rust reference <https://doc.rust-lang.org/reference/>, though a lot
 of corners were cut.
 -}
+{-# LANGUAGE DeriveFunctor     #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable    #-}
+{-# LANGUAGE PatternSynonyms   #-}
+
 module AST where
 
 import           Data.Text                      ( Text )
+
+import           Fix                            ( Fix )
 
 
 -- | Following terminology of Rust, a crate is a package that compiles to a 
 -- single library or an executable. For now, there will be no modules in Krapu
 -- so everything will be in a single namespace.
-newtype Crate = Crate [Item] deriving Show
+newtype Crate expr = Crate [Item expr]
+    deriving (Show, Functor, Foldable, Traversable)
 
 -- | Type represents type names
 newtype Type = Type Text deriving (Show, Eq, Ord)
@@ -26,63 +34,66 @@ newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
-data Item = Function Identifier [Parameter] Type Block deriving (Show, Eq)
+data Item expr = Function Identifier [Parameter] Type (Block expr)
+    deriving (Show, Eq, Functor, Foldable, Traversable)
 
 -- | Function parameter
 type Parameter = (Identifier, Type)
 
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
-data Block
+data Block expr
     -- | Outer expression will determine the return value of the block
-    = Block [Statement] Expr
-    deriving (Show, Eq)
+    = Block [Statement expr] expr
+    deriving (Show, Eq, Functor, Foldable, Traversable)
 
 -- | Single statement
-data Statement
+data Statement expr
     = StatementEmpty
-    | StatementItem Item
-    | StatementExpr Expr
-    | StatementLet Identifier Type Expr
-    | StatementReturn Expr
-    | StatementBreak Expr
-    deriving (Show, Eq)
+    | StatementItem (Item expr)
+    | StatementExpr expr
+    | StatementLet Identifier Type expr
+    | StatementReturn expr
+    | StatementBreak expr
+    deriving (Show, Eq, Functor, Foldable, Traversable)
 
-data Expr
+data ExprF expr
     -- Literals
     = Unit -- ^ Same as @()@ in Haskell and Rust
     | IntLit Integer
     | BoolLit Bool
     | Str Text
-    | ArrayLit [Expr]
+    | ArrayLit [expr]
     -- Variables
     | Var Identifier
     -- Arithmetic
-    | Negate Expr
-    | Plus Expr
-    | Expr :+ Expr
-    | Expr :- Expr
-    | Expr :* Expr
-    | Expr :/ Expr
+    | Negate expr
+    | Plus expr
+    | expr :+ expr
+    | expr :- expr
+    | expr :* expr
+    | expr :/ expr
     -- Boolean
-    | Expr :&& Expr
-    | Expr :|| Expr
-    | Not Expr
+    | expr :&& expr
+    | expr :|| expr
+    | Not expr
     -- Comparison
-    | Expr :> Expr
-    | Expr :>= Expr
-    | Expr :< Expr
-    | Expr :<= Expr
-    | Expr :== Expr
-    | Expr :!= Expr
+    | expr :> expr
+    | expr :>= expr
+    | expr :< expr
+    | expr :<= expr
+    | expr :== expr
+    | expr :!= expr
     -- Expressions with block
-    | IfExpr [(Expr, Block)] (Maybe Block)
-    | ExprBlock Block
-    | Loop Block
-    | While Expr Block
+    | IfExpr [(expr, Block expr)] (Maybe (Block expr))
+    | ExprBlock (Block expr)
+    | Loop (Block expr)
+    | While expr (Block expr)
     -- Assignment
-    | Expr := Expr
+    | expr := expr
     -- Misc
-    | FnCall Identifier [Expr]
-    | ArrayAccess Expr Expr
-    deriving (Show, Eq)
+    | FnCall Identifier [expr]
+    | ArrayAccess expr expr
+    deriving (Show, Eq, Functor, Foldable, Traversable)
+
+type Expr = Fix ExprF
