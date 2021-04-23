@@ -23,7 +23,7 @@ import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
-import Fix
+import           Fix
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
@@ -285,7 +285,7 @@ breakWith result = do
 eval :: Expr -> Interpreter Result
 eval = \case
     -- Literals
-    Fix Unit         -> pure ResUnit
+    Unit         -> pure ResUnit
     IntLit   i   -> pure $ ResInt i
     BoolLit  b   -> pure $ ResBool b
     Str      str -> pure $ ResStr str

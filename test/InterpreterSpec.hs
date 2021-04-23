@@ -17,7 +17,7 @@ import qualified Data.Map.Strict               as Map
 import qualified Data.Text                     as T
 
 
-exampleEnv :: IO Env
+exampleEnv :: IO (Env Expr)
 exampleEnv = do
     foo  <- newIORef $ ResInt 1
     bar  <- newIORef $ ResInt 42
@@ -29,7 +29,7 @@ exampleEnv = do
             ]
     pure $ emptyEnv { symTable = exampleSyms, fnDefs = exampleFnDefs }
 
-exampleFnDefs :: FnDefs
+exampleFnDefs :: (FnDefs Expr)
 exampleFnDefs = Map.fromList [min] :| []
   where
     min =
@@ -48,7 +48,7 @@ exampleFnDefs = Map.fromList [min] :| []
             )
         )
 
-usingEnv :: IO Env -> Interpreter b -> IO b
+usingEnv :: IO (Env Expr) -> Interpreter b -> IO b
 usingEnv ioEnv interpret = do
     env <- ioEnv
     evalStateT interpret env

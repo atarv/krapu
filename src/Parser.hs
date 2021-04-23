@@ -210,7 +210,7 @@ functionParam :: Parser Parameter
 functionParam = (,) <$> identifier <* symbol ":" <*> type_
 
 -- | Parse a statement
-statement :: Parser Statement
+statement :: Parser (Statement Expr)
 statement =
     try emptyStatement
         <|> try itemStatement
@@ -219,13 +219,13 @@ statement =
         <|> try breakStatement
         <|> try statementExpr
 
-emptyStatement :: Parser Statement
+emptyStatement :: Parser (Statement Expr)
 emptyStatement = StatementEmpty <$ symbol ";"
 
-itemStatement :: Parser Statement
+itemStatement :: Parser (Statement Expr)
 itemStatement = StatementItem <$> item
 
-statementExpr :: Parser Statement
+statementExpr :: Parser (Statement Expr)
 statementExpr = do
     e <- expression >>= \case
         -- Some expression statmenents don't have to end with a semicolon
@@ -234,11 +234,11 @@ statementExpr = do
         e             -> e <$ symbol ";"
     pure $ StatementExpr e
 
-returnStatement :: Parser Statement
+returnStatement :: Parser (Statement Expr)
 returnStatement =
     StatementReturn <$ symbol "return" <*> option Unit expression <* symbol ";"
 
-letStatement :: Parser Statement
+letStatement :: Parser (Statement Expr)
 letStatement =
     StatementLet
         <$> (symbol "let" *> identifier)
@@ -246,13 +246,13 @@ letStatement =
         <*> (symbol "=" *> expression)
         <*  symbol ";"
 
-breakStatement :: Parser Statement
+breakStatement :: Parser (Statement Expr)
 breakStatement =
     StatementBreak <$ symbol "break" <*> option Unit expression <* symbol ";"
 
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.
-block :: Parser Block
+block :: Parser (Block Expr)
 block = betweenBraces $ Block <$> many statement <*> option Unit expression
 
 -- | Parse a function call
@@ -261,7 +261,7 @@ functionCall = FnCall <$> identifier <*> argList
     where argList = betweenParens (expression `sepBy` symbol ",")
 
 -- | Parse a function declaration. Return type may be omitted.
-functionDeclaration :: Parser Item
+functionDeclaration :: Parser (Item Expr)
 functionDeclaration =
     Function
         <$  symbol "fn"
@@ -276,16 +276,16 @@ functionDeclaration =
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
 
 -- | Parse an item. Items are components of a crate.
-item :: Parser Item
+item :: Parser (Item Expr)
 item = functionDeclaration
 
 -- | Parse a whole crate. Empty crates are not allowed.
-crate :: Parser Crate
+crate :: Parser (Crate Expr)
 crate = between spaceConsumer eof $ Crate <$> some item
 
 -- | Parse a crate. Parse error is converted to text. First argument is the 
 -- source file name, which is displayed on error.
-parseCrate :: String -> Text -> Either Text Crate
+parseCrate :: String -> Text -> Either Text (Crate Expr)
 parseCrate src content =
     first (T.pack . errorBundlePretty) $ parse crate src content
 
@@ -297,6 +297,6 @@ parseProgram src content =
 
 -- | Parse a statement. Error is converted to text. First argument is the 
 -- source file name, which is displayed on error.
-parseStatement :: String -> Text -> Either Text Statement
+parseStatement :: String -> Text -> Either Text (Statement Expr)
 parseStatement src content =
     first (T.pack . errorBundlePretty) $ parse statement src content
