@@ -28,20 +28,22 @@ import qualified Data.Map.Strict               as Map
 import qualified Data.Set                      as Set
 import qualified Data.Text                     as T
 
+-- | Data types of Krapu
 data Type
     = TypeUnit
     | TypeI64
     | TypeStr
     | TypeBool
     | TypeArr Type
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 
-instance Show Type where
-    show = \case
-        TypeUnit  -> "Unit"
-        TypeI64   -> "I64"
-        TypeBool  -> "Bool"
-        TypeArr t -> show t <> "[]"
+-- | Display type in the way user should see it
+display :: Type -> String
+display = \case
+    TypeUnit  -> "Unit"
+    TypeI64   -> "I64"
+    TypeBool  -> "Bool"
+    TypeArr t -> show t <> "[]"
 
 type Types = Map TypeName Type
 type FnTypes = Map Identifier ([Type], Type)
@@ -51,15 +53,33 @@ data TypeEnv = TypeEnv { fnTypes :: FnTypes, varTypes :: VarTypes }
 type TypeError = String
 type Analyzer = StateT TypeEnv (Except TypeError)
 
+-- | Instances of @Inferable@ can have their type inferred
+class Inferable a where
+    -- | Infer node's type
+    infer :: a -> Analyzer Type
+
+instance Inferable Expr where
+    infer = inferExpr
+
+instance Inferable Block where
+    infer (Block _stmts outerExpr) = infer outerExpr
+
 primitiveTypes :: Types
 primitiveTypes = Map.fromList $ fmap
-    (\t -> (TypeName . T.pack . show $ t, t))
+    (\t -> (TypeName . T.pack . display $ t, t))
     [TypeUnit, TypeI64, TypeBool, TypeStr]
 
--- TODO: Add primitive function types
 initialEnv :: TypeEnv
-initialEnv = TypeEnv Map.empty $ Map.fromList
-    [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
+initialEnv = TypeEnv fnTypes varTypes
+  where
+    fnTypes = Map.fromList
+        [ (Identifier "debug_env" , ([], TypeUnit))
+        , (Identifier "println"   , ([TypeStr], TypeUnit))
+        , (Identifier "i64_to_str", ([TypeI64], TypeStr))
+        , (Identifier "str_to_i64", ([TypeStr], TypeI64))
+        ]
+    varTypes = Map.fromList
+        [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
 
 lookupVarType :: Identifier -> Analyzer Type
 lookupVarType idf@(Identifier name) = do
@@ -68,31 +88,39 @@ lookupVarType idf@(Identifier name) = do
         Nothing -> throwError $ "Variable '" <> T.unpack name <> "' not found"
         Just t  -> pure t
 
+lookupFnType :: Identifier -> Analyzer ([Type], Type)
+lookupFnType idf@(Identifier name) = do
+    fns <- gets fnTypes
+    case Map.lookup idf fns of
+        Nothing -> throwError $ "Function '" <> T.unpack name <> "' not found"
+        Just t  -> pure t
+
 errWrongType :: Show a => Type -> Type -> a -> Analyzer b
 errWrongType expected actual expr = throwError $ mconcat
     [ "Expected type "
-    , show expected
+    , display expected
     , " but actual was "
-    , show actual
+    , display actual
     , " from expression "
     , show expr
     ]
 
-inferBlock :: Block -> Analyzer Type
-inferBlock (Block _stmts outerExpr) = inferExpr outerExpr
-
 inferExpr :: Expr -> Analyzer Type
 inferExpr = \case
     -- Literals
-    Unit         -> pure TypeUnit
-    BoolLit _    -> pure TypeBool
-    IntLit  _    -> pure TypeI64
-    Str     _    -> pure TypeStr
-    -- TODO: arrays
+    Unit                    -> pure TypeUnit
+    BoolLit  _              -> pure TypeBool
+    IntLit   _              -> pure TypeI64
+    Str      _              -> pure TypeStr
+    ArrayLit []             -> throwError "Cannot infer type of an empty array"
+    ArrayLit (elem : elems) -> do
+        elemType <- inferExpr elem
+        mapM_ (check elemType) elems
+        pure elemType
     -- Variables
-    Var     idf  -> lookupVarType idf
+    Var    idf  -> lookupVarType idf
     -- Arithmetic
-    Negate  expr -> inferExpr expr >>= \case
+    Negate expr -> inferExpr expr >>= \case
         TypeI64 -> pure TypeI64
         wrong   -> errWrongType TypeI64 wrong expr
     Plus expr -> inferExpr expr >>= \case
@@ -117,54 +145,81 @@ inferExpr = \case
     IfExpr ifs altBlock -> do
         let (conditions, block : blocks) = unzip ifs
         -- Every condition should have boolean type
-        mapM_ (checkExpr TypeBool) conditions
-        firstType <- inferBlock block
-        let allBlocks = maybe blocks ((blocks ++) . (: [])) altBlock
+        mapM_ (check TypeBool) conditions
+        firstType <- infer block
         -- Every block should return same type
-        foldM checkTypesEqual firstType allBlocks
+        case altBlock of
+            Nothing -> TypeUnit <$ forM_
+                (block : blocks)
+                (\blck -> do
+                    blockType <- infer blck
+                    unless (blockType == TypeUnit)
+                        $ throwError
+                        $ "If expression must return unit, if else branch is \
+                          \not defined. "
+                        <> show blck
+                )
+            Just alt -> foldM checkTypesEqual firstType (blocks ++ [alt])
       where
         checkTypesEqual :: Type -> Block -> Analyzer Type
         checkTypesEqual prevType nextBlock = do
-            nextType <- inferBlock nextBlock
+            nextType <- infer nextBlock
             when (prevType /= nextType)
                 $ errWrongType prevType nextType nextBlock
             pure nextType
-    ExprBlock block  -> inferBlock block
+    ExprBlock block  -> infer block
     Loop      block  -> undefined -- TODO: infer break expressions' types
     While pred block -> do
-        checkExpr TypeBool pred
+        check TypeBool pred
         undefined -- TODO: infer break expressions' types
     -- Assignment
     lhs := rhs -> case lhs of
         Var var -> do
             varType <- lookupVarType var
-            checkExpr varType rhs
+            check varType rhs
             pure varType
         ArrayAccess (Var var) indexExpr -> do
-            checkExpr TypeI64 indexExpr
+            check TypeI64 indexExpr
             lookupVarType var >>= \case
                 TypeArr t -> do
-                    checkExpr t rhs
+                    check t rhs
                     pure t
                 nonArrayType ->
                     throwError
                         $  "Cannot index variable of type "
-                        <> show nonArrayType
+                        <> display nonArrayType
         ArrayAccess indexed indexExpr ->
             throwError $ "Cannot assign to expression " <> show indexed
-    -- TODO: FnCall
+    -- Function calls
+    FnCall (Identifier "debug") _ ->
+        -- Any number of arguments with any types may be debugged
+        pure TypeUnit
+    FnCall idf args -> do
+        (paramTypes, retType) <- lookupFnType idf
+        let paramCount = length paramTypes
+            argCount   = length args
+        when (argCount /= paramCount) $ throwError $ mconcat
+            [ "Expected "
+            , show paramCount
+            , " arguments, got "
+            , show argCount
+            , " when calling "
+            , show idf
+            ]
+        zipWithM_ check paramTypes args
+        pure retType
+    -- Misc
     ArrayAccess indexedExpr indexExpr -> do
         inferExpr indexedExpr >>= \case
             TypeArr t -> do
-                checkExpr TypeI64 indexExpr
+                check TypeI64 indexExpr
                 pure t
             nonIndexable -> throwError $ mconcat
                 [ "Cannot index a non-array type "
-                , show nonIndexable
+                , display nonIndexable
                 , ", "
                 , show indexedExpr
                 ]
-
 
 inferNumericBinExpr :: Expr -> Expr -> Analyzer Type
 inferNumericBinExpr = inferBinExpr (Set.fromList [TypeI64])
@@ -185,16 +240,15 @@ inferBinExpr allowedTypes lhs rhs = do
     lhsType <- inferExpr lhs
     if lhsType `Set.member` allowedTypes
         then do
-            checkExpr lhsType rhs
+            check lhsType rhs
             pure lhsType
         else throwError $ "Wrong type of expression " <> show lhs
 
-
--- | @checkExpr t expr@ checks that expression @expr@ is of given type @t@ 
+-- | @check t node@ checks that @node@ belonging to AST has given type @t@ 
 -- throwing an error if it is not.
-checkExpr :: Type -> Expr -> Analyzer ()
-checkExpr expected expr = do
-    actual <- inferExpr expr
+check :: (Inferable a, Show a) => Type -> a -> Analyzer ()
+check expected expr = do
+    actual <- infer expr
     when (expected /= actual) $ errWrongType expected actual expr
 
 -- | TODO: is this useful?
