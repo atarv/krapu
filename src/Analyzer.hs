@@ -1,9 +1,9 @@
 {-|
-Module         : Analysis
+Module         : Analyzer
 Description    : Static analysis (type checking etc.) for Krapu
 Copyright      : (c) Aleksi Tarvainen, 2021
 License        : BSD3
-Maintainer     : aleksi@atarv.dev
+Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 -}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
@@ -67,7 +67,7 @@ instance Inferable Block where
 primitiveTypes :: Types
 primitiveTypes = Map.fromList $ fmap
     (\t -> (TypeName . T.pack . display $ t, t))
-    [TypeUnit, TypeI64, TypeBool, TypeStr]
+    [TypeUnit, TypeI64, TypeBool, TypeStr] -- TODO: arrays?
 
 initialEnv :: TypeEnv
 initialEnv = TypeEnv fnTypes varTypes
@@ -81,6 +81,7 @@ initialEnv = TypeEnv fnTypes varTypes
     varTypes = Map.fromList
         [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
 
+-- | Lookup variable's type from analyzer's environment
 lookupVarType :: Identifier -> Analyzer Type
 lookupVarType idf@(Identifier name) = do
     vars <- gets varTypes
@@ -88,6 +89,8 @@ lookupVarType idf@(Identifier name) = do
         Nothing -> throwError $ "Variable '" <> T.unpack name <> "' not found"
         Just t  -> pure t
 
+-- | Lookup function's parameter's types and it's return type from analyzer's 
+-- environment
 lookupFnType :: Identifier -> Analyzer ([Type], Type)
 lookupFnType idf@(Identifier name) = do
     fns <- gets fnTypes
@@ -105,6 +108,10 @@ errWrongType expected actual expr = throwError $ mconcat
     , show expr
     ]
 
+-- | Infer the type of an expression
+-- 
+-- >>> flip evalStateT initialEnv $ inferExpr (IntLit 0 :< IntLit 2)
+-- ExceptT (Identity (Right TypeBool))
 inferExpr :: Expr -> Analyzer Type
 inferExpr = \case
     -- Literals
@@ -228,13 +235,20 @@ inferBoolBinExpr :: Expr -> Expr -> Analyzer Type
 inferBoolBinExpr = inferBinExpr (Set.fromList [TypeBool])
 
 inferComparableBinExpr :: Expr -> Expr -> Analyzer Type
-inferComparableBinExpr =
-    inferBinExpr (Set.fromList [TypeBool, TypeI64, TypeStr])
+inferComparableBinExpr lhs rhs =
+    TypeBool <$ inferBinExpr (Set.fromList [TypeBool, TypeI64, TypeStr]) lhs rhs
 
 inferEqBinExpr :: Expr -> Expr -> Analyzer Type
-inferEqBinExpr =
-    inferBinExpr (Set.fromList [TypeBool, TypeI64, TypeStr, TypeUnit])
+inferEqBinExpr lhs rhs =
+    TypeBool
+        <$ inferBinExpr
+               (Set.fromList [TypeBool, TypeI64, TypeStr, TypeUnit])
+               lhs
+               rhs
 
+-- | @inferBinExpr allowedTypes e1 e2@ checks that both expressions @e1@ and 
+-- @e2@ share a type that is in the set @allowedTypes@. Returns expressions' 
+-- inferred type.
 inferBinExpr :: Set Type -> Expr -> Expr -> Analyzer Type
 inferBinExpr allowedTypes lhs rhs = do
     lhsType <- inferExpr lhs

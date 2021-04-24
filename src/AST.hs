@@ -11,8 +11,8 @@ of corners were cut.
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE DeriveFoldable    #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE TypeFamilies       #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module AST where
 
@@ -95,5 +95,9 @@ data Expr
     | ArrayAccess Expr Expr
     deriving (Show, Eq)
 
+-- These make it possible to use recursion schemes from the library 
+-- recursion-schemes. I used it because otherwise I would have had to write many
+-- of the instances like Show and Ord for the datatypes by hand. 
+-- This Template Haskell magic generates those without any effort.
 makeBaseFunctor ''Expr
 makeBaseFunctor ''Statement
