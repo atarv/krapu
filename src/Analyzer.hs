@@ -13,6 +13,7 @@ module Analyzer where
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.State.Strict
+import           Data.Functor.Foldable          ( cata )
 import           Data.Map.Strict                ( Map )
 import           Data.Maybe
 import           Data.List.NonEmpty             ( NonEmpty(..)
@@ -43,7 +44,7 @@ display = \case
     TypeUnit  -> "Unit"
     TypeI64   -> "I64"
     TypeBool  -> "Bool"
-    TypeArr t -> show t <> "[]"
+    TypeArr t -> display t <> "[]"
 
 type Types = Map TypeName Type
 type FnTypes = Map Identifier ([Type], Type)
@@ -174,11 +175,29 @@ inferExpr = \case
             when (prevType /= nextType)
                 $ errWrongType prevType nextType nextBlock
             pure nextType
-    ExprBlock block  -> infer block
-    Loop      block  -> undefined -- TODO: infer break expressions' types
+    ExprBlock block -> infer block
+    Loop      block -> do
+        case pickBreakExprs block of
+            []     -> pure TypeUnit -- In this case the loop is endless
+            breaks -> do
+                expectedBrkType <- infer $ head breaks
+                forM_ (tail breaks) $ \break -> do
+                    brkType <- infer break
+                    unless (brkType == expectedBrkType) $ throwError $ mconcat
+                        [ "Expected break expression with type "
+                        , show expectedBrkType
+                        , ", actual "
+                        , show brkType
+                        , " in "
+                        , show block
+                        ]
+                pure expectedBrkType
     While pred block -> do
         check TypeBool pred
-        undefined -- TODO: infer break expressions' types
+        case pickBreakExprs block of
+            []     -> pure TypeUnit
+            -- Breaking from while loop is permitted only with unit value
+            breaks -> TypeUnit <$ mapM_ (check TypeUnit) breaks
     -- Assignment
     lhs := rhs -> case lhs of
         Var var -> do
@@ -257,6 +276,79 @@ inferBinExpr allowedTypes lhs rhs = do
             check lhsType rhs
             pure lhsType
         else throwError $ "Wrong type of expression " <> show lhs
+
+pickBreakExprs :: Block -> [Expr]
+pickBreakExprs (Block stmts _) = mconcat $ fmap (cata alg) stmts
+  where
+    alg :: StatementF [Expr] -> [Expr]
+    alg (StatementBreakF expr) =
+        -- Take into account both what the block evaluates to and the possible
+        -- break statements inside it
+        expr : mconcat (pickBreakExprs <$> foldMap pickNonLoopBlocks [expr])
+    alg (StatementExprF expr) =
+        mconcat $ pickBreakExprs <$> foldMap pickNonLoopBlocks [expr]
+    alg (StatementLetF _ _ expr) =
+        mconcat $ pickBreakExprs <$> foldMap pickNonLoopBlocks [expr]
+    alg (StatementReturnF expr) =
+        mconcat $ pickBreakExprs <$> foldMap pickNonLoopBlocks [expr]
+    alg _ = []
+
+pickNonLoopBlocks :: Expr -> [Block]
+pickNonLoopBlocks = cata alg
+  where
+    alg :: ExprF [Block] -> [Block]
+    alg (IfExprF ifs altBlock) = case altBlock of
+        Nothing ->
+            let (conditions, conseqs) = unzip ifs
+            in  mconcat conditions ++ conseqs
+        Just alt ->
+            let (conditions, conseqs) = unzip ifs
+            in  alt : mconcat conditions ++ conseqs
+    alg (ExprBlockF block      ) = [block]
+    alg (NegateF    expr       ) = expr
+    alg (PlusF      expr       ) = expr
+    alg (NotF       expr       ) = expr
+    alg (ArrayLitF  expr       ) = mconcat expr
+    alg (lhs          :+$  rhs ) = lhs ++ rhs
+    alg (lhs          :-$  rhs ) = lhs ++ rhs
+    alg (lhs          :/$  rhs ) = lhs ++ rhs
+    alg (lhs          :*$  rhs ) = lhs ++ rhs
+    alg (lhs          :==$ rhs ) = lhs ++ rhs
+    alg (lhs          :!=$ rhs ) = lhs ++ rhs
+    alg (lhs          :=$  rhs ) = lhs ++ rhs
+    alg (lhs          :||$ rhs ) = lhs ++ rhs
+    alg (lhs          :&&$ rhs ) = lhs ++ rhs
+    alg (lhs          :>$  rhs ) = lhs ++ rhs
+    alg (lhs          :>=$ rhs ) = lhs ++ rhs
+    alg (lhs          :<$  rhs ) = lhs ++ rhs
+    alg (lhs          :<=$ rhs ) = lhs ++ rhs
+    alg (ArrayAccessF idxd idx ) = idxd ++ idx
+    alg (FnCallF      _    args) = mconcat args
+    alg _                        = []
+
+-- TODO: move this example block to tests or something
+ex :: Block
+ex = Block
+    [ StatementEmpty
+    , StatementBreak Unit
+    , StatementExpr $ IfExpr
+        [ ( BoolLit True
+          , Block
+              [ StatementBreak (IntLit 1)
+              , StatementLet
+                  (Identifier "foo")
+                  (TypeName "I64")
+                  (ExprBlock $ Block [StatementBreak $ BoolLit False] Unit)
+              , StatementBreak $ ExprBlock $ Block
+                  [StatementBreak $ IntLit 42, StatementBreak Unit]
+                  Unit
+              ]
+              Unit
+          )
+        ]
+        Nothing
+    ]
+    Unit
 
 -- | @check t node@ checks that @node@ belonging to AST has given type @t@ 
 -- throwing an error if it is not.
