@@ -191,9 +191,10 @@ whileLoop = While <$ symbol "while" <*> expression <*> block
 -- | Parse a type identifier (starts with upper case letter)
 typeName :: Parser TypeName
 typeName = lexeme . label "type" $ do
-    initial <- T.singleton <$> upperChar
-    rest    <- T.pack <$> many alphaNumChar
-    pure . TypeName $ initial <> rest
+    initial  <- T.singleton <$> upperChar
+    rest     <- T.pack <$> many alphaNumChar
+    brackets <- mconcat <$> many (chunk "[]")
+    pure . TypeName $ initial <> rest <> brackets
 
 -- | Parse an identifier of other language constructs than types
 identifier :: Parser Identifier
@@ -242,7 +243,7 @@ letStatement :: Parser Statement
 letStatement =
     StatementLet
         <$> (symbol "let" *> identifier)
-        <*> (symbol ":" *> typeName)
+        <*> optional (symbol ":" *> typeName)
         <*> (symbol "=" *> expression)
         <*  symbol ";"
 

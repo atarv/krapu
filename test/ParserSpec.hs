@@ -127,8 +127,11 @@ spec = do
         it "can be parsed"
             $             parse statement "" "let xyzzy: I64 = 4321 ;"
             `shouldParse` StatementLet (Identifier "xyzzy")
-                                       (TypeName "I64")
+                                       (Just $ TypeName "I64")
                                        (IntLit 4321)
+        it "declaring type is optional"
+            $             parse statement "" "let x = 123 ;"
+            `shouldParse` StatementLet (Identifier "x") Nothing (IntLit 123)
 
     describe "function declarations" $ do
         it "can contain more function definitions"

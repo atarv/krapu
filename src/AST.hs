@@ -51,7 +51,7 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
-    | StatementLet Identifier TypeName Expr
+    | StatementLet Identifier (Maybe TypeName) Expr
     | StatementReturn Expr
     | StatementBreak Expr
     deriving (Show, Eq)

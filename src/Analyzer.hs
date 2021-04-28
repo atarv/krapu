@@ -16,6 +16,7 @@ import           Control.Monad.State.Strict
 import           Data.Functor.Foldable          ( cata )
 import           Data.Map.Strict                ( Map )
 import           Data.Maybe
+import           Data.List                      ( intercalate )
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
@@ -44,6 +45,7 @@ display = \case
     TypeUnit  -> "Unit"
     TypeI64   -> "I64"
     TypeBool  -> "Bool"
+    TypeStr   -> "Str"
     TypeArr t -> display t <> "[]"
 
 type Types = Map TypeName Type
@@ -68,7 +70,7 @@ instance Inferable Block where
 primitiveTypes :: Types
 primitiveTypes = Map.fromList $ fmap
     (\t -> (TypeName . T.pack . display $ t, t))
-    [TypeUnit, TypeI64, TypeBool, TypeStr] -- TODO: arrays?
+    [TypeUnit, TypeI64, TypeBool, TypeStr]
 
 initialEnv :: TypeEnv
 initialEnv = TypeEnv fnTypes varTypes
@@ -81,6 +83,16 @@ initialEnv = TypeEnv fnTypes varTypes
         ]
     varTypes = Map.fromList
         [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
+
+getType :: TypeName -> Analyzer Type
+getType (TypeName name) = do
+    let elem     = TypeName $ T.takeWhile (not . isBracket) name
+        brackets = T.takeWhileEnd isBracket name
+        arrLevel = T.length brackets `div` 2
+    case Map.lookup elem primitiveTypes of
+        Nothing -> throwError $ "Could not find type " <> T.unpack name
+        Just t  -> pure $ foldr ($) t $ replicate arrLevel TypeArr
+    where isBracket c = c == '[' || c == ']'
 
 -- | Lookup variable's type from analyzer's environment
 lookupVarType :: Identifier -> Analyzer Type
@@ -98,6 +110,15 @@ lookupFnType idf@(Identifier name) = do
     case Map.lookup idf fns of
         Nothing -> throwError $ "Function '" <> T.unpack name <> "' not found"
         Just t  -> pure t
+
+declareVar :: Identifier -> Type -> Analyzer ()
+declareVar idf t =
+    modify' $ \env -> env { varTypes = Map.insert idf t $ varTypes env }
+
+-- | TODO: check if already declared?
+declareFn :: Identifier -> [Type] -> Type -> Analyzer ()
+declareFn idf paramTypes retType = modify' $ \env ->
+    env { fnTypes = Map.insert idf (paramTypes, retType) $ fnTypes env }
 
 errWrongType :: Show a => Type -> Type -> a -> Analyzer b
 errWrongType expected actual expr = throwError $ mconcat
@@ -124,7 +145,7 @@ inferExpr = \case
     ArrayLit (elem : elems) -> do
         elemType <- inferExpr elem
         mapM_ (check elemType) elems
-        pure elemType
+        pure $ TypeArr elemType
     -- Variables
     Var    idf  -> lookupVarType idf
     -- Arithmetic
@@ -176,22 +197,21 @@ inferExpr = \case
                 $ errWrongType prevType nextType nextBlock
             pure nextType
     ExprBlock block -> infer block
-    Loop      block -> do
-        case pickBreakExprs block of
-            []     -> pure TypeUnit -- In this case the loop is endless
-            breaks -> do
-                expectedBrkType <- infer $ head breaks
-                forM_ (tail breaks) $ \break -> do
-                    brkType <- infer break
-                    unless (brkType == expectedBrkType) $ throwError $ mconcat
-                        [ "Expected break expression with type "
-                        , show expectedBrkType
-                        , ", actual "
-                        , show brkType
-                        , " in "
-                        , show block
-                        ]
-                pure expectedBrkType
+    Loop      block -> case pickBreakExprs block of
+        []     -> pure TypeUnit -- In this case the loop is endless
+        breaks -> do
+            expectedBrkType <- infer $ head breaks
+            forM_ (tail breaks) $ \break -> do
+                brkType <- infer break
+                unless (brkType == expectedBrkType) $ throwError $ mconcat
+                    [ "Expected break expression with type "
+                    , show expectedBrkType
+                    , ", actual "
+                    , show brkType
+                    , " in "
+                    , show block
+                    ]
+            pure expectedBrkType
     While pred block -> do
         check TypeBool pred
         case pickBreakExprs block of
@@ -207,9 +227,7 @@ inferExpr = \case
         ArrayAccess (Var var) indexExpr -> do
             check TypeI64 indexExpr
             lookupVarType var >>= \case
-                TypeArr t -> do
-                    check t rhs
-                    pure t
+                TypeArr t -> check t rhs >> pure t
                 nonArrayType ->
                     throwError
                         $  "Cannot index variable of type "
@@ -275,7 +293,12 @@ inferBinExpr allowedTypes lhs rhs = do
         then do
             check lhsType rhs
             pure lhsType
-        else throwError $ "Wrong type of expression " <> show lhs
+        else throwError $ mconcat
+            [ "Excpected "
+            , show lhs
+            , " to be one of "
+            , intercalate ", " (show <$> Set.toAscList allowedTypes)
+            ]
 
 pickBreakExprs :: Block -> [Expr]
 pickBreakExprs (Block stmts _) = mconcat $ fmap (cata alg) stmts
@@ -337,7 +360,7 @@ ex = Block
               [ StatementBreak (IntLit 1)
               , StatementLet
                   (Identifier "foo")
-                  (TypeName "I64")
+                  (Just $ TypeName "I64")
                   (ExprBlock $ Block [StatementBreak $ BoolLit False] Unit)
               , StatementBreak $ ExprBlock $ Block
                   [StatementBreak $ IntLit 42, StatementBreak Unit]
@@ -356,6 +379,43 @@ check :: (Inferable a, Show a) => Type -> a -> Analyzer ()
 check expected expr = do
     actual <- infer expr
     when (expected /= actual) $ errWrongType expected actual expr
+
+declareItem :: Item -> Analyzer ()
+declareItem = \case
+    Function fnName params retType _body -> do
+        paramTypes <- traverse getType (snd <$> params)
+        retType'   <- getType retType
+        declareFn fnName paramTypes retType'
+
+checkItem :: Item -> Analyzer ()
+checkItem = \case
+    Function fnName params retType body -> do
+        retType' <- getType retType
+        check retType' body
+
+checkStatement :: Statement -> Analyzer ()
+checkStatement = \case
+    StatementEmpty                 -> pure ()
+    StatementExpr   expr           -> void $ infer expr
+    StatementBreak  expr           -> void $ infer expr
+    StatementReturn expr           -> void $ infer expr
+    StatementItem   _              -> pure ()
+    StatementLet idf typeName expr -> case typeName of
+        Nothing    -> infer expr >>= declareVar idf
+        Just tName -> do
+            t <- getType tName
+            declareVar idf t
+            check t expr
+
+checkCrate :: Crate -> Analyzer ()
+checkCrate (Crate items) = do
+    mapM_ declareItem items
+    mapM_ checkItem   items
+
+analyzeCrate :: Crate -> Either Text Crate
+analyzeCrate crate = do
+    runExcept $ withExceptT T.pack $ evalStateT (checkCrate crate) initialEnv
+    pure crate
 
 -- | TODO: is this useful?
 analyzeExpr :: Expr -> IO ()
