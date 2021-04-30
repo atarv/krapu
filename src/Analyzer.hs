@@ -65,7 +65,10 @@ instance Inferable Expr where
     infer = inferExpr
 
 instance Inferable Block where
-    infer (Block _stmts outerExpr) = infer outerExpr
+    infer (Block stmts outerExpr) = do
+        mapM_ checkItemStatement stmts
+        mapM_ checkStatement     stmts
+        infer outerExpr
 
 primitiveTypes :: Types
 primitiveTypes = Map.fromList $ fmap
@@ -90,8 +93,8 @@ getType (TypeName name) = do
         brackets = T.takeWhileEnd isBracket name
         arrLevel = T.length brackets `div` 2
     case Map.lookup elem primitiveTypes of
-        Nothing -> throwError $ "Could not find type " <> T.unpack name
-        Just t  -> pure $ foldr ($) t $ replicate arrLevel TypeArr
+        Nothing    -> throwError $ "Could not find type " <> T.unpack name
+        Just type' -> pure $ foldr ($) type' $ replicate arrLevel TypeArr
     where isBracket c = c == '[' || c == ']'
 
 -- | Lookup variable's type from analyzer's environment
@@ -124,11 +127,21 @@ errWrongType :: Show a => Type -> Type -> a -> Analyzer b
 errWrongType expected actual expr = throwError $ mconcat
     [ "Expected type "
     , display expected
-    , " but actual was "
+    , ", but actual was "
     , display actual
     , " from expression "
     , show expr
     ]
+
+-- | Run given action in a new scope
+withinNewScope :: Analyzer a -> Analyzer a
+withinNewScope action = do
+    -- There are no variables to keep track of so implementing scopes like this 
+    -- might be enough
+    priorState <- get
+    result     <- action
+    put priorState
+    pure result
 
 -- | Infer the type of an expression
 -- 
@@ -389,9 +402,25 @@ declareItem = \case
 
 checkItem :: Item -> Analyzer ()
 checkItem = \case
-    Function fnName params retType body -> do
-        retType' <- getType retType
-        check retType' body
+    Function fnName params retType (Block stmts outerExpr) -> do
+        let (paramNames, typeNames) = unzip params
+        paramTypes <- mapM getType typeNames
+        retType'   <- getType retType
+        -- declare before checking to support recursive calls
+        declareFn fnName paramTypes retType'
+        withinNewScope $ do
+            mapM_ (uncurry declareVar) $ zip paramNames paramTypes
+            mapM_ checkItemStatement stmts
+            mapM_ checkStatement     stmts
+            -- TODO: check that returned expressions are of same type
+            check retType' outerExpr
+
+-- | Item statements have to checked before other statements because function
+-- hoisting is allowed and the declarations have to be available
+checkItemStatement :: Statement -> Analyzer ()
+checkItemStatement = \case
+    StatementItem item -> checkItem item
+    _                  -> pure ()
 
 checkStatement :: Statement -> Analyzer ()
 checkStatement = \case

@@ -44,6 +44,7 @@ type Parameter = (Identifier, TypeName)
 data Block
     -- | Outer expression will determine the return value of the block
     = Block [Statement] Expr
+    -- TODO: change outer expression to Maybe Expr to make type check easier
     deriving (Show, Eq)
 
 -- | Single statement

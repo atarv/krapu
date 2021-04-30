@@ -1,4 +1,4 @@
-fn t() {
+fn t() -> I64 {
     1
 }
 
@@ -11,7 +11,7 @@ fn main() {
     // I think this is called hoisting, at least in JavaScript terms.
     let f: I64 = t();
 
-    fn t() {
+    fn t() -> I64 {
         2
     }
 
