@@ -18,7 +18,7 @@ module AST where
 
 import           Data.Functor.Foldable.TH       ( makeBaseFunctor )
 import           Data.Text                      ( Text )
-import           Data.List.NonEmpty             ( NonEmpty )
+import           Data.List.NonEmpty             ( )
 
 
 -- | Following terminology of Rust, a crate is a package that compiles to a 

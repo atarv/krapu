@@ -44,7 +44,7 @@ main = do
         ([Interpret], []        , []  ) -> run "stdin" [] stdin
         ([Interpret], src : args, []  ) -> withFile src ReadMode (run src args)
         ([Check    ], []        , []  ) -> run "stdin" [] stdin
-        ([Check    ], src : args, []  ) -> withFile src ReadMode (checkFile src)
+        ([Check    ], src : _   , []  ) -> withFile src ReadMode (checkFile src)
         ([Repl     ], args      , []  ) -> repl args
         ([]         , []        , []  ) -> run "stdin" [] stdin
         ([]         , src : args, []  ) -> withFile src ReadMode (run src args)

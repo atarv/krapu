@@ -7,19 +7,17 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 -}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE FlexibleContexts  #-}
 
 module Analyzer where
 
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.State.Strict
+import           Data.Bifunctor
 import           Data.Functor.Foldable          ( cata )
 import           Data.Map.Strict                ( Map )
-import           Data.Maybe
-import           Data.List                      ( intercalate )
-import           Data.List.NonEmpty             ( NonEmpty(..)
-                                                , (<|)
-                                                )
+import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 
@@ -53,8 +51,79 @@ type FnTypes = Map Identifier ([Type], Type)
 type VarTypes = Map Identifier Type
 data TypeEnv = TypeEnv { fnTypes :: FnTypes, varTypes :: VarTypes }
 
-type TypeError = String
-type Analyzer = StateT TypeEnv (Except TypeError)
+data AnalyzerException
+    = TypeMismatch Type (NonEmpty Type) String
+    | TypeNameNotFound TypeName
+    | VarNotFound Identifier
+    | FnNotFound Identifier
+    | NonUnitIfExpr Type Block
+    | CannotIndex Type Type Expr
+    | CannotAssign Type Expr
+    | InvalidArgCount Identifier Int Int
+    | CannotInferEmptyArray
+    deriving Eq
+
+instance Show AnalyzerException where
+    show = \case
+        TypeMismatch actual (expected :| []) expr -> mconcat
+            [ "Expected type "
+            , display expected
+            , ", but actual was "
+            , display actual
+            , " in "
+            , expr
+            ]
+        TypeMismatch actual expected expr -> mconcat
+            [ "Expected type to be one of ["
+            , concat $ NonEmpty.intersperse ", " $ fmap display expected
+            , "], but actual was "
+            , display actual
+            , " in "
+            , expr
+            ]
+        TypeNameNotFound (TypeName name) ->
+            "Could not find definition of type " <> T.unpack name
+        FnNotFound (Identifier name) ->
+            mconcat
+                [ "Could not find function '"
+                , T.unpack name
+                , "' in current context"
+                ]
+        VarNotFound (Identifier name) ->
+            mconcat
+                [ "Could not find variable '"
+                , T.unpack name
+                , "' in currenct context"
+                ]
+        NonUnitIfExpr typ block -> mconcat
+            [ "If else branch of if-expression is not defined,"
+            , " branches must have type Unit. Got "
+            , display typ
+            , " in "
+            , show block
+            ]
+        CannotIndex indexedType indexType expr -> mconcat
+            [ "Cannot index "
+            , display indexedType
+            , " with "
+            , display indexType
+            , " in "
+            , show expr
+            ]
+        CannotAssign typ expr ->
+            "Cannot assign to " <> display typ <> " in " <> show expr
+        InvalidArgCount (Identifier name) params args -> mconcat
+            [ "Function '"
+            , T.unpack name
+            , "' expects "
+            , show params
+            , " arguments, but "
+            , show args
+            , " were supplied"
+            ]
+        CannotInferEmptyArray -> "Cannot infer type of an empty array"
+
+type Analyzer = StateT TypeEnv (Except AnalyzerException)
 
 -- | Instances of @Inferable@ can have their type inferred
 class Inferable a where
@@ -88,30 +157,30 @@ initialEnv = TypeEnv fnTypes varTypes
         [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
 
 getType :: TypeName -> Analyzer Type
-getType (TypeName name) = do
+getType tn@(TypeName name) = do
     let elem     = TypeName $ T.takeWhile (not . isBracket) name
         brackets = T.takeWhileEnd isBracket name
         arrLevel = T.length brackets `div` 2
     case Map.lookup elem primitiveTypes of
-        Nothing    -> throwError $ "Could not find type " <> T.unpack name
+        Nothing    -> throwError $ TypeNameNotFound tn
         Just type' -> pure $ foldr ($) type' $ replicate arrLevel TypeArr
     where isBracket c = c == '[' || c == ']'
 
 -- | Lookup variable's type from analyzer's environment
 lookupVarType :: Identifier -> Analyzer Type
-lookupVarType idf@(Identifier name) = do
+lookupVarType idf = do
     vars <- gets varTypes
     case Map.lookup idf vars of
-        Nothing -> throwError $ "Variable '" <> T.unpack name <> "' not found"
+        Nothing -> throwError $ VarNotFound idf
         Just t  -> pure t
 
 -- | Lookup function's parameter's types and it's return type from analyzer's 
 -- environment
 lookupFnType :: Identifier -> Analyzer ([Type], Type)
-lookupFnType idf@(Identifier name) = do
+lookupFnType idf = do
     fns <- gets fnTypes
     case Map.lookup idf fns of
-        Nothing -> throwError $ "Function '" <> T.unpack name <> "' not found"
+        Nothing -> throwError $ FnNotFound idf
         Just t  -> pure t
 
 declareVar :: Identifier -> Type -> Analyzer ()
@@ -123,15 +192,9 @@ declareFn :: Identifier -> [Type] -> Type -> Analyzer ()
 declareFn idf paramTypes retType = modify' $ \env ->
     env { fnTypes = Map.insert idf (paramTypes, retType) $ fnTypes env }
 
-errWrongType :: Show a => Type -> Type -> a -> Analyzer b
-errWrongType expected actual expr = throwError $ mconcat
-    [ "Expected type "
-    , display expected
-    , ", but actual was "
-    , display actual
-    , " from expression "
-    , show expr
-    ]
+errTypeMismatch :: Show a => Type -> Type -> a -> Analyzer b
+errTypeMismatch expected actual expr =
+    throwError $ TypeMismatch actual (expected :| []) (show expr)
 
 -- | Run given action in a new scope
 withinNewScope :: Analyzer a -> Analyzer a
@@ -154,7 +217,7 @@ inferExpr = \case
     BoolLit  _              -> pure TypeBool
     IntLit   _              -> pure TypeI64
     Str      _              -> pure TypeStr
-    ArrayLit []             -> throwError "Cannot infer type of an empty array"
+    ArrayLit []             -> throwError CannotInferEmptyArray
     ArrayLit (elem : elems) -> do
         elemType <- inferExpr elem
         mapM_ (check elemType) elems
@@ -164,10 +227,10 @@ inferExpr = \case
     -- Arithmetic
     Negate expr -> inferExpr expr >>= \case
         TypeI64 -> pure TypeI64
-        wrong   -> errWrongType TypeI64 wrong expr
+        wrong   -> errTypeMismatch TypeI64 wrong expr
     Plus expr -> inferExpr expr >>= \case
         TypeI64 -> pure TypeI64
-        wrong   -> errWrongType TypeI64 wrong expr
+        wrong   -> errTypeMismatch TypeI64 wrong expr
     lhs :+  rhs         -> inferNumericBinExpr lhs rhs
     lhs :-  rhs         -> inferNumericBinExpr lhs rhs
     lhs :*  rhs         -> inferNumericBinExpr lhs rhs
@@ -196,10 +259,7 @@ inferExpr = \case
                 (\blck -> do
                     blockType <- infer blck
                     unless (blockType == TypeUnit)
-                        $ throwError
-                        $ "If expression must return unit, if else branch is \
-                          \not defined. "
-                        <> show blck
+                        $ throwError (NonUnitIfExpr blockType blck)
                 )
             Just alt -> foldM checkTypesEqual firstType (blocks ++ [alt])
       where
@@ -207,7 +267,7 @@ inferExpr = \case
         checkTypesEqual prevType nextBlock = do
             nextType <- infer nextBlock
             when (prevType /= nextType)
-                $ errWrongType prevType nextType nextBlock
+                $ errTypeMismatch prevType nextType nextBlock
             pure nextType
     ExprBlock block -> infer block
     Loop      block -> case pickBreakExprs block of
@@ -216,14 +276,8 @@ inferExpr = \case
             expectedBrkType <- infer $ head breaks
             forM_ (tail breaks) $ \break -> do
                 brkType <- infer break
-                unless (brkType == expectedBrkType) $ throwError $ mconcat
-                    [ "Expected break expression with type "
-                    , show expectedBrkType
-                    , ", actual "
-                    , show brkType
-                    , " in "
-                    , show block
-                    ]
+                unless (brkType == expectedBrkType)
+                    $ errTypeMismatch expectedBrkType brkType block
             pure expectedBrkType
     While pred block -> do
         check TypeBool pred
@@ -242,11 +296,13 @@ inferExpr = \case
             lookupVarType var >>= \case
                 TypeArr t -> check t rhs >> pure t
                 nonArrayType ->
-                    throwError
-                        $  "Cannot index variable of type "
-                        <> display nonArrayType
-        ArrayAccess indexed indexExpr ->
-            throwError $ "Cannot assign to expression " <> show indexed
+                    throwError $ CannotIndex nonArrayType TypeI64 indexExpr
+        ArrayAccess indexed _indexExpr -> do
+            t <- infer indexed
+            throwError $ CannotAssign t indexed
+        unindexable -> do
+            t <- infer unindexable
+            throwError $ CannotIndex t TypeI64 unindexable
     -- Function calls
     FnCall (Identifier "debug") _ ->
         -- Any number of arguments with any types may be debugged
@@ -255,14 +311,10 @@ inferExpr = \case
         (paramTypes, retType) <- lookupFnType idf
         let paramCount = length paramTypes
             argCount   = length args
-        when (argCount /= paramCount) $ throwError $ mconcat
-            [ "Expected "
-            , show paramCount
-            , " arguments, got "
-            , show argCount
-            , " when calling "
-            , show idf
-            ]
+        when (argCount /= paramCount) . throwError $ InvalidArgCount
+            idf
+            paramCount
+            argCount
         zipWithM_ check paramTypes args
         pure retType
     -- Misc
@@ -271,12 +323,9 @@ inferExpr = \case
             TypeArr t -> do
                 check TypeI64 indexExpr
                 pure t
-            nonIndexable -> throwError $ mconcat
-                [ "Cannot index a non-array type "
-                , display nonIndexable
-                , ", "
-                , show indexedExpr
-                ]
+            nonIndexable -> do
+                t <- infer indexExpr
+                throwError $ CannotIndex nonIndexable t indexedExpr
 
 inferNumericBinExpr :: Expr -> Expr -> Analyzer Type
 inferNumericBinExpr = inferBinExpr (Set.fromList [TypeI64])
@@ -306,12 +355,10 @@ inferBinExpr allowedTypes lhs rhs = do
         then do
             check lhsType rhs
             pure lhsType
-        else throwError $ mconcat
-            [ "Excpected "
-            , show lhs
-            , " to be one of "
-            , intercalate ", " (show <$> Set.toAscList allowedTypes)
-            ]
+        else throwError $ TypeMismatch
+            lhsType
+            (NonEmpty.fromList $ Set.toAscList allowedTypes)
+            (show lhs)
 
 pickBreakExprs :: Block -> [Expr]
 pickBreakExprs (Block stmts _) = mconcat $ fmap (cata alg) stmts
@@ -391,7 +438,7 @@ ex = Block
 check :: (Inferable a, Show a) => Type -> a -> Analyzer ()
 check expected expr = do
     actual <- infer expr
-    when (expected /= actual) $ errWrongType expected actual expr
+    when (expected /= actual) $ errTypeMismatch expected actual expr
 
 declareItem :: Item -> Analyzer ()
 declareItem = \case
@@ -412,7 +459,7 @@ checkItem = \case
             mapM_ (uncurry declareVar) $ zip paramNames paramTypes
             mapM_ checkItemStatement stmts
             mapM_ checkStatement     stmts
-            -- TODO: check that returned expressions are of same type
+            -- TODO: check that return statements are of same type
             check retType' outerExpr
 
 -- | Item statements have to checked before other statements because function
@@ -442,12 +489,11 @@ checkCrate (Crate items) = do
     mapM_ checkItem   items
 
 analyzeCrate :: Crate -> Either Text Crate
-analyzeCrate crate = do
-    runExcept $ withExceptT T.pack $ evalStateT (checkCrate crate) initialEnv
-    pure crate
+analyzeCrate crate =
+    crate <$ first (T.pack . show) (runAnalyzer (checkCrate crate))
 
--- | TODO: is this useful?
-analyzeExpr :: Expr -> IO ()
-analyzeExpr expr = do
-    let typ = evalStateT (inferExpr expr) initialEnv
-    print typ
+runAnalyzerIO :: Analyzer a -> IO a
+runAnalyzerIO = either (fail . show) pure . runAnalyzer
+
+runAnalyzer :: Analyzer a -> Either AnalyzerException a
+runAnalyzer analyzer = runExcept $ evalStateT analyzer initialEnv

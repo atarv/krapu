@@ -353,7 +353,7 @@ eval = \case
 
     ExprBlock block      -> evalBlock block
     While predicate body -> withBreakAllowed True $ do
-        runExceptT . forever $ do
+        void $ runExceptT . forever $ do
             continue <- lift $ eval predicate >>= \case
                 ResBool b -> pure b
                 nonBool ->

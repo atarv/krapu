@@ -68,6 +68,7 @@ test-suite krapu-test
   main-is: Spec.hs
   other-modules:
       Paths_krapu
+      AnalyzerSpec
       InterpreterSpec
       ParserSpec
       ExamplesSpec
