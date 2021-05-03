@@ -36,14 +36,13 @@ exampleFnDefs = Map.fromList [min] :| []
         ( Identifier "min"
         , FnDef
             [Identifier "a", Identifier "b"]
-            (Block
-                []
+            (Block [] $ Just
                 (IfExpr
                     [ ( Var (Identifier "a") :<= Var (Identifier "b")
-                      , Block [] (Var (Identifier "a"))
+                      , Block [] $ Just (Var (Identifier "a"))
                       )
                     ]
-                    (Just (Block [] (Var (Identifier "b"))))
+                    (Just (Block [] $ Just (Var (Identifier "b"))))
                 )
             )
         )
@@ -73,20 +72,20 @@ spec = do
         -- env <- runIO emptyEnv
         prop "condition is handled correctly" $ \(cond, conseq, alt) -> do
             result <- flip evalStateT emptyEnv $ eval
-                (IfExpr [(BoolLit cond, Block [] (BoolLit conseq))]
-                        (Just (Block [] (BoolLit alt)))
+                (IfExpr [(BoolLit cond, Block [] $ Just (BoolLit conseq))]
+                        (Just (Block [] $ Just (BoolLit alt)))
                 )
             result `shouldBe` ResBool (if cond then conseq else alt)
         prop "else if branches are handled"
             $ \(condIf, condElseIf, conseqIf, conseqElseIf, alt) -> do
                   result <- flip evalStateT emptyEnv $ eval
                       (IfExpr
-                          [ (BoolLit condIf, Block [] (BoolLit conseqIf))
+                          [ (BoolLit condIf, Block [] $ Just (BoolLit conseqIf))
                           , ( BoolLit condElseIf
-                            , Block [] (BoolLit conseqElseIf)
+                            , Block [] $ Just (BoolLit conseqElseIf)
                             )
                           ]
-                          (Just $ Block [] (BoolLit alt))
+                          (Just $ Block [] $ Just (BoolLit alt))
                       )
                   result
                       `shouldBe` ResBool
@@ -127,45 +126,53 @@ spec = do
                       usingExampleEnv $ eval (Var $ Identifier "doesNotExist")
               in  noVar `shouldThrow` anyException
         it "looks in outer context(s) if variable is not found on current" $ do
-            let testOuterContext = usingExampleEnv $ evalBlock
-                    (Block
-                        [ StatementLet (Identifier "x")
-                                       (Just $ TypeName "I64")
-                                       (IntLit 2)
-                        ]
-                        (ExprBlock $ Block [] (Var $ Identifier "x"))
+            let
+                testOuterContext = usingExampleEnv $ evalBlock
+                    ( Block
+                            [ StatementLet (Identifier "x")
+                                           (Just $ TypeName "I64")
+                                           (IntLit 2)
+                            ]
+                    $ Just
+                          (ExprBlock $ Block [] $ Just
+                              (Var $ Identifier "x")
+                          )
                     )
             testOuterContext `shouldReturn` ResInt 2
         it "should fail if trying to access that was in an exited scope"
-            $ let accessInnerScope = usingExampleEnv $ evalBlock
-                      (Block
-                          [ StatementExpr $ ExprBlock $ Block
-                                [ StatementLet (Identifier "x")
-                                               (Just $ TypeName "I64")
-                                               (IntLit 2)
-                                ]
-                                Unit
-                          ]
-                          (ExprBlock $ Block [] (Var $ Identifier "x"))
+            $ let
+                  accessInnerScope = usingExampleEnv $ evalBlock
+                      ( Block
+                              [ StatementExpr $ ExprBlock $ Block
+                                    [ StatementLet (Identifier "x")
+                                                   (Just $ TypeName "I64")
+                                                   (IntLit 2)
+                                    ]
+                                    Nothing
+                              ]
+                      $ Just
+                            (ExprBlock $ Block [] $ Just
+                                (Var $ Identifier "x")
+                            )
                       )
               in  accessInnerScope `shouldThrow` anyException
 
     describe "Assignment expression" $ do
         it "sets variable's value" $ do
-            let assignment = usingExampleEnv $ evalBlock
-                    (Block
-                        [StatementExpr (Var (Identifier "foo") := IntLit 75)]
-                        (Var (Identifier "foo"))
+            let
+                assignment = usingExampleEnv $ evalBlock
+                    (Block [StatementExpr (Var (Identifier "foo") := IntLit 75)]
+                    $ Just (Var (Identifier "foo"))
                     )
             assignment `shouldReturn` ResInt 75
         it "can be chained and it's right associative" $ do
             let chainedAssignment = usingExampleEnv $ evalBlock
-                    (Block
-                        [ StatementExpr
-                          $  Var (Identifier "bar")
-                          := (Var (Identifier "foo") := IntLit 0)
-                        ]
-                        (Var (Identifier "bar"))
+                    ( Block
+                            [ StatementExpr
+                              $  Var (Identifier "bar")
+                              := (Var (Identifier "foo") := IntLit 0)
+                            ]
+                    $ Just (Var (Identifier "bar"))
                     )
             chainedAssignment `shouldReturn` ResInt 0
 
@@ -181,7 +188,7 @@ spec = do
                                   $  Var (Identifier "foo")
                                   := (Var (Identifier "foo") :+ IntLit 4)
                                 ]
-                                Unit
+                                Nothing
                             )
                         )
                     lookupVar (Identifier "foo")
@@ -215,11 +222,11 @@ spec = do
                               (Identifier "f")
                               []
                               (TypeName "I64")
-                              (Block
-                                  [ StatementReturn (IntLit 1)
-                                  , StatementReturn (IntLit 2)
-                                  ]
-                                  (IntLit 3)
+                              ( Block
+                                      [ StatementReturn (IntLit 1)
+                                      , StatementReturn (IntLit 2)
+                                      ]
+                              $ Just (IntLit 3)
                               )
                           )
                       eval (FnCall (Identifier "f") [])
@@ -251,7 +258,7 @@ spec = do
                           (StatementLet
                               (Identifier "l")
                               (Just $ TypeName "I64")
-                              (Loop (Block [StatementBreak $ IntLit 1] Unit))
+                              (Loop (Block [StatementBreak $ IntLit 1] Nothing))
                           )
                       lookupVar (Identifier "l")
               in  breakLoop `shouldReturn` ResInt 1
@@ -262,7 +269,7 @@ spec = do
                               (Identifier "brk")
                               []
                               (TypeName "Unit")
-                              (Block [StatementBreak Unit] Unit)
+                              (Block [StatementBreak Unit] Nothing)
                           )
                       eval (FnCall (Identifier "brk") [])
               in  errBreak `shouldThrow` anyException

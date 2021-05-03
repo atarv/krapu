@@ -149,7 +149,8 @@ term = do
     -- This parser had to be written in this kind of unfortunate way because of 
     -- left recursion introduced by array access
     first <-
-        betweenParens expression
+        try unitLiteral
+        <|> betweenParens expression
         <|> ifExpr
         <|> blockExpr
         <|> whileLoop
@@ -254,7 +255,7 @@ breakStatement =
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.
 block :: Parser Block
-block = betweenBraces $ Block <$> many statement <*> option Unit expression
+block = betweenBraces $ Block <$> many statement <*> optional expression
 
 -- | Parse a function call
 functionCall :: Parser Expr

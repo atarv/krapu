@@ -17,6 +17,7 @@ import           Control.Monad.State.Strict
 import           Data.Bifunctor
 import           Data.Functor.Foldable          ( cata )
 import           Data.Map.Strict                ( Map )
+import           Data.Maybe
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
@@ -137,7 +138,7 @@ instance Inferable Block where
     infer (Block stmts outerExpr) = do
         mapM_ checkItemStatement stmts
         mapM_ checkStatement     stmts
-        infer outerExpr
+        maybe (pure TypeUnit) infer outerExpr
 
 primitiveTypes :: Types
 primitiveTypes = Map.fromList $ fmap
@@ -421,17 +422,17 @@ ex = Block
               , StatementLet
                   (Identifier "foo")
                   (Just $ TypeName "I64")
-                  (ExprBlock $ Block [StatementBreak $ BoolLit False] Unit)
+                  (ExprBlock $ Block [StatementBreak $ BoolLit False] Nothing)
               , StatementBreak $ ExprBlock $ Block
                   [StatementBreak $ IntLit 42, StatementBreak Unit]
-                  Unit
+                  Nothing
               ]
-              Unit
+              Nothing
           )
         ]
         Nothing
     ]
-    Unit
+    Nothing
 
 -- | @check t node@ checks that @node@ belonging to AST has given type @t@ 
 -- throwing an error if it is not.
@@ -460,7 +461,7 @@ checkItem = \case
             mapM_ checkItemStatement stmts
             mapM_ checkStatement     stmts
             -- TODO: check that return statements are of same type
-            check retType' outerExpr
+            check retType' (fromMaybe Unit outerExpr)
 
 -- | Item statements have to checked before other statements because function
 -- hoisting is allowed and the declarations have to be available

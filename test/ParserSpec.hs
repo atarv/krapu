@@ -63,7 +63,7 @@ spec = do
             $             parse ifExpr "" "if 1 < 2 { 3; }"
             `shouldParse` IfExpr
                               [ ( IntLit 1 :< IntLit 2
-                                , Block [StatementExpr $ IntLit 3] Unit
+                                , Block [StatementExpr $ IntLit 3] Nothing
                                 )
                               ]
                               Nothing
@@ -74,22 +74,22 @@ spec = do
             `shouldParse` IfExpr
                               [ ( IfExpr
                                     [ ( IntLit 1 :> IntLit 2
-                                      , Block [] (BoolLit False)
+                                      , Block [] $ Just (BoolLit False)
                                       )
                                     ]
-                                    (Just $ Block [] (BoolLit True))
-                                , Block [] (IntLit 3)
+                                    (Just $ Block [] $ Just (BoolLit True))
+                                , Block [] $ Just (IntLit 3)
                                 )
                               ]
-                              (Just (Block [] (IntLit 4)))
+                              (Just (Block [] $ Just (IntLit 4)))
         it "can have else if branches"
             $             parse ifExpr "" "if -2 < i { 1 } else if i == 0 { 2 }"
             `shouldParse` IfExpr
                               [ ( Negate (IntLit 2) :< Var (Identifier "i")
-                                , Block [] (IntLit 1)
+                                , Block [] $ Just (IntLit 1)
                                 )
                               , ( Var (Identifier "i") :== IntLit 0
-                                , Block [] (IntLit 2)
+                                , Block [] $ Just (IntLit 2)
                                 )
                               ]
                               Nothing
@@ -102,8 +102,10 @@ spec = do
                     \{ 2 }"
             parse ifExpr "" withComments
                 `shouldParse` IfExpr
-                                  [ (BoolLit False       , Block [] (IntLit 1))
-                                  , (IntLit 1 :< IntLit 2, Block [] (IntLit 2))
+                                  [ (BoolLit False, Block [] $ Just (IntLit 1))
+                                  , ( IntLit 1 :< IntLit 2
+                                    , Block [] $ Just (IntLit 2)
+                                    )
                                   ]
                                   Nothing
 
@@ -111,16 +113,21 @@ spec = do
         it "can be nested and used as a return value"
             $             parse blockExpr "" "{ ; { 1 } }"
             `shouldParse` ExprBlock
-                              (Block [StatementEmpty]
-                                     (ExprBlock (Block [] (IntLit 1)))
+                              (Block [StatementEmpty] $ Just
+                                  (ExprBlock (Block [] $ Just (IntLit 1)))
                               )
+        it
+                "declaring unit excplicitly as outer expression results in\
+                \ different AST"
+            $             parse blockExpr "" "{ () }"
+            `shouldParse` ExprBlock (Block [] (Just Unit))
 
     describe "block statements" $ do
         it "end in semicolon to separate them from block expressions"
             $             parse statement "" "{ ; { } };"
             `shouldParse` StatementExpr
-                              (ExprBlock $ Block [StatementEmpty]
-                                                 (ExprBlock $ Block [] Unit)
+                              (ExprBlock $ Block [StatementEmpty] $ Just
+                                  (ExprBlock $ Block [] Nothing)
                               )
 
     describe "let statements" $ do
@@ -140,14 +147,14 @@ spec = do
                               (Identifier "f")
                               []
                               (TypeName "Unit")
-                              (Block
-                                  [ StatementItem $ Function
-                                        (Identifier "g")
-                                        []
-                                        (TypeName "Unit")
-                                        (Block [] (IntLit 2))
-                                  ]
-                                  (FnCall (Identifier "g") [])
+                              ( Block
+                                      [ StatementItem $ Function
+                                            (Identifier "g")
+                                            []
+                                            (TypeName "Unit")
+                                            (Block [] $ Just (IntLit 2))
+                                      ]
+                              $ Just (FnCall (Identifier "g") [])
                               )
 
     describe "function calls" $ do

@@ -15,6 +15,7 @@ import           Control.Monad
 import           Control.Monad.State.Strict
 import           Control.Monad.Except
 import           Data.Array.IO
+import           Data.Functor.Foldable
 import           Data.IORef
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
@@ -249,9 +250,9 @@ evalBlock :: Block -> Interpreter Result
 evalBlock (Block stmts outerExpr) = withinNewScope $ do
     mapM_ addItem       stmts
     mapM_ execStatement stmts
-    returnVal <- (<|>) <$> gets returning <*> gets breaking
+    returnVal <- liftM2 (<|>) (gets returning) (gets breaking)
     case returnVal of
-        Nothing  -> eval outerExpr
+        Nothing  -> eval $ fromMaybe Unit outerExpr
         -- Outer expression is not evaluated when returning early
         Just val -> pure val
 
@@ -259,11 +260,11 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
-execStatement stmt = executionCanceled >>= \case
+execStatement stmt = executionCanceled >>= flip
+    unless
     -- If function is returning or loop is exited with break, statements are 
     -- skipped until function and/or loop is exited. See 'evalBlock'
-    True  -> pure ()
-    False -> case stmt of
+    (case stmt of
         StatementEmpty              -> pure ()
         StatementExpr expr          -> void $ eval expr
         -- Items should be added to environment using 'addItem' before 
@@ -272,6 +273,7 @@ execStatement stmt = executionCanceled >>= \case
         StatementLet idf _type expr -> eval expr >>= defineVar idf
         StatementReturn expr        -> eval expr >>= setReturn
         StatementBreak  expr        -> eval expr >>= breakWith
+    )
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()

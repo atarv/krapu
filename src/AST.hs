@@ -43,8 +43,7 @@ type Parameter = (Identifier, TypeName)
 -- contents.
 data Block
     -- | Outer expression will determine the return value of the block
-    = Block [Statement] Expr
-    -- TODO: change outer expression to Maybe Expr to make type check easier
+    = Block [Statement] (Maybe Expr)
     deriving (Show, Eq)
 
 -- | Single statement
