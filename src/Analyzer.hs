@@ -214,15 +214,28 @@ withinNewScope action = do
 inferExpr :: Expr -> Analyzer Type
 inferExpr = \case
     -- Literals
-    Unit                    -> pure TypeUnit
-    BoolLit  _              -> pure TypeBool
-    IntLit   _              -> pure TypeI64
-    Str      _              -> pure TypeStr
-    ArrayLit []             -> throwError CannotInferEmptyArray
-    ArrayLit (elem : elems) -> do
-        elemType <- inferExpr elem
-        mapM_ (check elemType) elems
-        pure $ TypeArr elemType
+    Unit                  -> pure TypeUnit
+    BoolLit _             -> pure TypeBool
+    IntLit  _             -> pure TypeI64
+    Str     _             -> pure TypeStr
+    arrLit@(ArrayLit arr) -> do
+        elemTypes <- catMaybes <$> forM
+            arr
+            (\elem -> (Just <$> inferExpr elem)
+                -- In this case empty arrays are of the same type as other 
+                -- arrays, so the exception can be suppressed
+                `catchError` \CannotInferEmptyArray -> pure Nothing
+            )
+        when (null elemTypes) $ throwError CannotInferEmptyArray
+        -- Check that all elements' types match
+        TypeArr <$> foldM
+            (\expected t -> do
+                unless (expected == t) $ errTypeMismatch expected t arrLit
+                pure t
+            )
+            (head elemTypes)
+            (tail elemTypes)
+
     -- Variables
     Var    idf  -> lookupVarType idf
     -- Arithmetic
