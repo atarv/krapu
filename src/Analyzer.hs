@@ -305,18 +305,18 @@ inferExpr = \case
             varType <- lookupVarType var
             check varType rhs
             pure varType
-        ArrayAccess (Var var) indexExpr -> do
-            check TypeI64 indexExpr
+        ArrayAccess (Var var) index -> do
+            check TypeI64 index
             lookupVarType var >>= \case
                 TypeArr t -> check t rhs >> pure t
                 nonArrayType ->
-                    throwError $ CannotIndex nonArrayType TypeI64 indexExpr
+                    throwError $ CannotIndex nonArrayType TypeI64 index
         ArrayAccess indexed _indexExpr -> do
             t <- infer indexed
             throwError $ CannotAssign t indexed
         unindexable -> do
             t <- infer unindexable
-            throwError $ CannotIndex t TypeI64 unindexable
+            throwError $ CannotAssign t unindexable
     -- Function calls
     FnCall (Identifier "debug") _ ->
         -- Any number of arguments with any types may be debugged
@@ -332,14 +332,13 @@ inferExpr = \case
         zipWithM_ check paramTypes args
         pure retType
     -- Misc
-    ArrayAccess indexedExpr indexExpr -> do
-        inferExpr indexedExpr >>= \case
-            TypeArr t -> do
-                check TypeI64 indexExpr
-                pure t
-            nonIndexable -> do
-                t <- infer indexExpr
-                throwError $ CannotIndex nonIndexable t indexedExpr
+    ArrayAccess indexed index -> inferExpr indexed >>= \case
+        TypeArr t -> do
+            check TypeI64 index
+            pure t
+        nonIndexable -> do
+            t <- infer index
+            throwError $ CannotIndex nonIndexable t indexed
 
 inferNumericBinExpr :: Expr -> Expr -> Analyzer Type
 inferNumericBinExpr = inferBinExpr (Set.fromList [TypeI64])

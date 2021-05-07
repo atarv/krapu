@@ -71,8 +71,10 @@ parseAst src handle = do
 run :: String -> [String] -> Handle -> IO ()
 run src args handle = do
     content <- T.hGetContents handle
-    either printParseError (runProgram args) $ parseCrate src content
-    where printParseError err = T.putStrLn err >> exitFailure
+    either printError (runProgram args)
+        $   parseCrate src content
+        >>= analyzeCrate
+    where printError err = T.putStrLn err >> exitFailure
 
 prompt :: Text
 prompt = "krapu>"
