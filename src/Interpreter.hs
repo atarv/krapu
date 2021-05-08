@@ -25,6 +25,7 @@ import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
+import           Helpers                        ( onHeadOf )
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
@@ -110,11 +111,6 @@ lookupVar idf = findVarRef idf >>= \case
     Nothing ->
         let (Identifier var) = idf
         in  fail $ "Variable '" <> T.unpack var <> "' not found"
-
--- | @onHeadOf f xs@ returns the list @xs@ with function @f@ applied on it's 
--- first element.
-onHeadOf :: (a -> a) -> NonEmpty a -> NonEmpty a
-onHeadOf fn (x :| xs) = fn x :| xs
 
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.

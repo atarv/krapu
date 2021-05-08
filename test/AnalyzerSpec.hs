@@ -1,4 +1,9 @@
-module AnalyzerSpec (spec) where
+{-# LANGUAGE OverloadedStrings #-}
+
+module AnalyzerSpec
+    ( spec
+    )
+where
 
 import           Data.List.NonEmpty
 import           Data.Text                      ( Text )
@@ -9,7 +14,6 @@ import           AST
 
 import qualified Data.Text                     as T
 
-{-# LANGUAGE OverloadedStrings #-}
 
 spec :: Spec
 spec = do
@@ -78,19 +82,16 @@ spec = do
             $ let
                   testCase = do
                       checkStatement
-                          (StatementLet (Identifier $ T.pack "foo")
-                                        Nothing
-                                        (IntLit 1)
-                          )
-                      infer $ Var (Identifier $ T.pack "foo")
+                          (StatementLet (Identifier "foo") Nothing (IntLit 1))
+                      infer $ Var (Identifier "foo")
               in  runAnalyzer testCase `shouldBe` Right TypeI64
 
         it "throws if explicit type doesn't match right hand side"
             $          runAnalyzer
                            (do
                                checkStatement $ StatementLet
-                                   (Identifier $ T.pack "bar")
-                                   (Just . TypeName $ T.pack "Bool")
+                                   (Identifier "bar")
+                                   (Just . TypeName $ "Bool")
                                    (IntLit 0)
                            )
             `shouldBe` Left (TypeMismatch TypeI64 (TypeBool :| []) "IntLit 0")
@@ -99,19 +100,19 @@ spec = do
         it "work if every branch has the same type"
             $          runAnalyzer
                            (infer $ IfExpr
-                               [ (BoolLit False, Block [] (Just . Str $ T.pack "asdf"))
-                               , (BoolLit True, Block [] (Just . Str $ T.pack "qwer"))
+                               [ (BoolLit False, Block [] (Just . Str $ "asdf"))
+                               , (BoolLit True , Block [] (Just . Str $ "qwer"))
                                ]
-                               (Just $ Block [] (Just . Str $ T.pack "zxcv"))
+                               (Just $ Block [] (Just . Str $ "zxcv"))
                            )
             `shouldBe` Right TypeStr
         it "throws if one branch has differing type"
             $          runAnalyzer
                            (infer $ IfExpr
-                               [ (BoolLit False, Block [] (Just . Str $ T.pack "asdf"))
-                               , (BoolLit True, Block [] (Just Unit))
+                               [ (BoolLit False, Block [] (Just . Str $ "asdf"))
+                               , (BoolLit True , Block [] (Just Unit))
                                ]
-                               (Just $ Block [] (Just . Str $ T.pack "zxcv"))
+                               (Just $ Block [] (Just . Str $ "zxcv"))
                            )
             `shouldBe` Left
                            (TypeMismatch TypeUnit
@@ -149,11 +150,11 @@ spec = do
             $ let
                   errAssignment = runAnalyzer $ do
                       checkStatement
-                          (StatementLet (Identifier $ T.pack "foo")
+                          (StatementLet (Identifier "foo")
                                         Nothing
                                         (BoolLit True)
                           )
-                      infer $ Var (Identifier $ T.pack "foo") := IntLit 0
+                      infer $ Var (Identifier "foo") := IntLit 0
               in
                   errAssignment `shouldBe` Left
                       (TypeMismatch TypeI64 (TypeBool :| []) "IntLit 0")
@@ -166,16 +167,65 @@ spec = do
             $ let
                   assignedTypeErr = runAnalyzer $ do
                       checkStatement
-                          (StatementLet (Identifier $ T.pack "arr")
+                          (StatementLet (Identifier "arr")
                                         Nothing
                                         (ArrayLit [IntLit 0, IntLit 1])
                           )
                       infer
-                          $  ArrayAccess (Var (Identifier $ T.pack "arr"))
-                                         (IntLit 1)
+                          $  ArrayAccess (Var (Identifier "arr")) (IntLit 1)
 
                           := BoolLit True
               in  assignedTypeErr `shouldBe` Left
                       (TypeMismatch TypeBool (TypeI64 :| []) "BoolLit True")
+
+    describe "Function declarations" $ do
+        it "throws if return value's type differs from declared return type"
+            $          runAnalyzer
+                           (checkItem $ Function (Identifier "f")
+                                                 []
+                                                 (TypeName "I64")
+                                                 (Block [] (Just $ BoolLit False))
+                           )
+            `shouldBe` Left
+                           (TypeMismatch TypeBool
+                                         (TypeI64 :| [])
+                                         "BoolLit False"
+                           )
+        it "throws if function body contains a type mismatch"
+            $          runAnalyzer
+                           (checkItem $ Function
+                               (Identifier "f")
+                               [(Identifier "x", TypeName "I64")]
+                               (TypeName "I64")
+                               (Block
+                                   [StatementExpr $ BoolLit True :+ Var (Identifier "x")]
+                                   (Just $ IntLit 1)
+                               )
+                           )
+            `shouldBe` Left
+                           (TypeMismatch TypeBool (TypeI64 :| []) "BoolLit True"
+                           )
+        it "throws if trying to declare function with same name twice"
+            $ let declareTwice = runAnalyzer $ do
+                      declareItem $ Function (Identifier "f")
+                                             []
+                                             (TypeName "I64")
+                                             (Block [] (Just $ IntLit 1))
+                      declareItem $ Function
+                          (Identifier "f")
+                          []
+                          (TypeName "Bool")
+                          (Block [] (Just $ BoolLit True))
+              in  declareTwice
+                      `shouldBe` Left (DuplicateFnDeclaration (Identifier "f"))
+        -- it "throws if return statement's inferred type differs from return type"
+        --     $          runAnalyzer
+        --                    (checkItem $ Function
+        --                        (Identifier "f")
+        --                        [(Identifier "x", TypeName "I64")]
+        --                        (TypeName "I64")
+        --                        (Block [StatementReturn Unit] (Just $ IntLit 1))
+        --                    )
+        --     `shouldBe` Left (TypeMismatch TypeUnit (TypeI64 :| []) "Unit")
 
 -- TODO: test function declaration, function calls, loops, breaks & returns

@@ -11,18 +11,24 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Analyzer where
 
+import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.State.Strict
 import           Data.Bifunctor
 import           Data.Functor.Foldable          ( cata )
+import           Data.List.NonEmpty             ( NonEmpty(..)
+                                                , (<|)
+                                                )
 import           Data.Map.Strict                ( Map )
 import           Data.Maybe
-import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 
 import           AST
+import           Helpers                        ( onHeadOf
+                                                , lookupMaps
+                                                )
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
@@ -48,10 +54,15 @@ display = \case
     TypeArr t -> display t <> "[]"
 
 type Types = Map TypeName Type
-type FnTypes = Map Identifier ([Type], Type)
+type FnTypes = NonEmpty (Map Identifier ([Type], Type))
 type VarTypes = Map Identifier Type
-data TypeEnv = TypeEnv { fnTypes :: FnTypes, varTypes :: VarTypes }
+data TypeEnv = TypeEnv
+    { fnTypes :: FnTypes -- ^ Type declarations of functions
+    , varTypes :: VarTypes -- ^ Variables' types
+    , returnType :: Type -- ^ Return type that is allowed in current context
+    }
 
+-- | Exceptions that might arise when performing analysis on AST
 data AnalyzerException
     = TypeMismatch Type (NonEmpty Type) String
     | TypeNameNotFound TypeName
@@ -62,6 +73,7 @@ data AnalyzerException
     | CannotAssign Type Expr
     | InvalidArgCount Identifier Int Int
     | CannotInferEmptyArray
+    | DuplicateFnDeclaration Identifier
     deriving Eq
 
 instance Show AnalyzerException where
@@ -123,6 +135,8 @@ instance Show AnalyzerException where
             , " were supplied"
             ]
         CannotInferEmptyArray -> "Cannot infer type of an empty array"
+        DuplicateFnDeclaration (Identifier name) ->
+            "Duplicate declaration of function '" <> T.unpack name <> "'"
 
 type Analyzer = StateT TypeEnv (Except AnalyzerException)
 
@@ -136,8 +150,7 @@ instance Inferable Expr where
 
 instance Inferable Block where
     infer (Block stmts outerExpr) = do
-        mapM_ checkItemStatement stmts
-        mapM_ checkStatement     stmts
+        analyzeStatements stmts
         maybe (pure TypeUnit) infer outerExpr
 
 primitiveTypes :: Types
@@ -145,8 +158,9 @@ primitiveTypes = Map.fromList $ fmap
     (\t -> (TypeName . T.pack . display $ t, t))
     [TypeUnit, TypeI64, TypeBool, TypeStr]
 
+-- | Initial environment of the analyzer
 initialEnv :: TypeEnv
-initialEnv = TypeEnv fnTypes varTypes
+initialEnv = TypeEnv (fnTypes :| []) varTypes TypeUnit
   where
     fnTypes = Map.fromList
         [ (Identifier "debug_env" , ([], TypeUnit))
@@ -157,6 +171,8 @@ initialEnv = TypeEnv fnTypes varTypes
     varTypes = Map.fromList
         [(Identifier "argc", TypeI64), (Identifier "argv", TypeArr TypeStr)]
 
+-- | Get the actual type that given typename represents. Throws if typename is 
+-- not found or otherwise invalid.
 getType :: TypeName -> Analyzer Type
 getType tn@(TypeName name) = do
     let elem     = TypeName $ T.takeWhile (not . isBracket) name
@@ -180,19 +196,29 @@ lookupVarType idf = do
 lookupFnType :: Identifier -> Analyzer ([Type], Type)
 lookupFnType idf = do
     fns <- gets fnTypes
-    case Map.lookup idf fns of
+    case lookupMaps idf fns of
         Nothing -> throwError $ FnNotFound idf
         Just t  -> pure t
 
+-- | Add variable's type to type environment
 declareVar :: Identifier -> Type -> Analyzer ()
 declareVar idf t =
     modify' $ \env -> env { varTypes = Map.insert idf t $ varTypes env }
 
--- | TODO: check if already declared?
+-- | Add function to type environment. Throws if function with same name would 
+-- be declared another time in the same context.
 declareFn :: Identifier -> [Type] -> Type -> Analyzer ()
-declareFn idf paramTypes retType = modify' $ \env ->
-    env { fnTypes = Map.insert idf (paramTypes, retType) $ fnTypes env }
+declareFn idf paramTypes retType = do
+    functions <- gets fnTypes
+    case Map.lookup idf $ NonEmpty.head functions of
+        Nothing -> modify' $ \env -> env
+            { fnTypes = Map.insert idf (paramTypes, retType)
+                            `onHeadOf` fnTypes env
+            }
+        Just _ -> throwError $ DuplicateFnDeclaration idf
 
+-- | Throw an where two types mismatch. Use @TypeMismatch@ constructor if 
+-- there's more than one expected type
 errTypeMismatch :: Show a => Type -> Type -> a -> Analyzer b
 errTypeMismatch expected actual expr =
     throwError $ TypeMismatch actual (expected :| []) (show expr)
@@ -200,11 +226,18 @@ errTypeMismatch expected actual expr =
 -- | Run given action in a new scope
 withinNewScope :: Analyzer a -> Analyzer a
 withinNewScope action = do
-    -- There are no variables to keep track of so implementing scopes like this 
-    -- might be enough
     priorState <- get
-    result     <- action
+    modify' $ \env -> env { fnTypes = Map.empty <| fnTypes env }
+    result <- action
     put priorState
+    pure result
+
+withReturnType :: Type -> Analyzer a -> Analyzer a
+withReturnType t analyzer = do
+    oldRetType <- gets returnType
+    modify' $ \env -> env { returnType = t }
+    result <- analyzer
+    modify' $ \env -> env { returnType = oldRetType }
     pure result
 
 -- | Infer the type of an expression
@@ -286,7 +319,7 @@ inferExpr = \case
     ExprBlock block -> infer block
     Loop      block -> case pickBreakExprs block of
         []     -> pure TypeUnit -- In this case the loop is endless
-        breaks -> do
+        breaks -> do -- TODO: better handling of breaks
             expectedBrkType <- infer $ head breaks
             forM_ (tail breaks) $ \break -> do
                 brkType <- infer break
@@ -340,16 +373,21 @@ inferExpr = \case
             t <- infer index
             throwError $ CannotIndex nonIndexable t indexed
 
+-- | Infer the type of a numeric binary expression
 inferNumericBinExpr :: Expr -> Expr -> Analyzer Type
 inferNumericBinExpr = inferBinExpr (Set.fromList [TypeI64])
 
+-- | Infer type of boolean binary expression
 inferBoolBinExpr :: Expr -> Expr -> Analyzer Type
 inferBoolBinExpr = inferBinExpr (Set.fromList [TypeBool])
 
+-- | Infer the type of binary expression of two comparable expressions
 inferComparableBinExpr :: Expr -> Expr -> Analyzer Type
 inferComparableBinExpr lhs rhs =
     TypeBool <$ inferBinExpr (Set.fromList [TypeBool, TypeI64, TypeStr]) lhs rhs
 
+-- | Infer the type of binary expression of two expressions that can be checked
+-- for equality
 inferEqBinExpr :: Expr -> Expr -> Analyzer Type
 inferEqBinExpr lhs rhs =
     TypeBool
@@ -453,6 +491,7 @@ check expected expr = do
     actual <- infer expr
     when (expected /= actual) $ errTypeMismatch expected actual expr
 
+-- | Add item to type environment
 declareItem :: Item -> Analyzer ()
 declareItem = \case
     Function fnName params retType _body -> do
@@ -460,20 +499,32 @@ declareItem = \case
         retType'   <- getType retType
         declareFn fnName paramTypes retType'
 
+-- | Check item's validity
 checkItem :: Item -> Analyzer ()
 checkItem = \case
-    Function fnName params retType (Block stmts outerExpr) -> do
+    Function fnName params retTypeName (Block stmts outerExpr) -> do
         let (paramNames, typeNames) = unzip params
         paramTypes <- mapM getType typeNames
-        retType'   <- getType retType
-        -- declare before checking to support recursive calls
-        declareFn fnName paramTypes retType'
+        retType    <- getType retTypeName
+        -- Items should be declare before checking to support recursive calls!
         withinNewScope $ do
             mapM_ (uncurry declareVar) $ zip paramNames paramTypes
-            mapM_ checkItemStatement stmts
-            mapM_ checkStatement     stmts
+            analyzeStatements stmts
             -- TODO: check that return statements are of same type
-            check retType' (fromMaybe Unit outerExpr)
+            check retType (fromMaybe Unit outerExpr)
+
+-- | Perform analysis of statements in the order it's expected
+analyzeStatements :: Foldable t => t Statement -> Analyzer ()
+analyzeStatements stmts = do
+    mapM_ declareItemStatement stmts
+    mapM_ checkItemStatement   stmts
+    mapM_ checkStatement       stmts
+
+-- | Add item contained in statement to type environment
+declareItemStatement :: Statement -> Analyzer ()
+declareItemStatement = \case
+    StatementItem item -> declareItem item
+    _                  -> pure ()
 
 -- | Item statements have to checked before other statements because function
 -- hoisting is allowed and the declarations have to be available
@@ -482,6 +533,7 @@ checkItemStatement = \case
     StatementItem item -> checkItem item
     _                  -> pure ()
 
+-- | Check statement's validity
 checkStatement :: Statement -> Analyzer ()
 checkStatement = \case
     StatementEmpty                 -> pure ()
@@ -496,15 +548,18 @@ checkStatement = \case
             declareVar idf t
             check t expr
 
+-- | Check a whole crate
 checkCrate :: Crate -> Analyzer ()
 checkCrate (Crate items) = do
     mapM_ declareItem items
     mapM_ checkItem   items
 
+-- | Performa analysis on a crate
 analyzeCrate :: Crate -> Either Text Crate
 analyzeCrate crate =
     crate <$ first (T.pack . show) (runAnalyzer (checkCrate crate))
 
+-- | Run given analyzer in IO monad
 runAnalyzerIO :: Analyzer a -> IO a
 runAnalyzerIO = either (fail . show) pure . runAnalyzer
 

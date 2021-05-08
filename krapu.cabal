@@ -30,6 +30,7 @@ library
       AST
       Interpreter
       Analyzer
+      Helpers
   other-modules:
       Paths_krapu
   hs-source-dirs:
