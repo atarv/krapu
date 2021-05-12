@@ -2,7 +2,7 @@ fn f() -> I64 {
     42
 }
 
-fn main() {
+fn main() -> I64 {
     return f();
     println("This shouldn't print");
 }

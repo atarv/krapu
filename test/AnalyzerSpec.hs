@@ -1,9 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module AnalyzerSpec
-    ( spec
-    )
-where
+module AnalyzerSpec (spec) where
 
 import           Data.List.NonEmpty
 import           Data.Text                      ( Text )
@@ -218,14 +215,52 @@ spec = do
                           (Block [] (Just $ BoolLit True))
               in  declareTwice
                       `shouldBe` Left (DuplicateFnDeclaration (Identifier "f"))
-        -- it "throws if return statement's inferred type differs from return type"
-        --     $          runAnalyzer
-        --                    (checkItem $ Function
-        --                        (Identifier "f")
-        --                        [(Identifier "x", TypeName "I64")]
-        --                        (TypeName "I64")
-        --                        (Block [StatementReturn Unit] (Just $ IntLit 1))
-        --                    )
-        --     `shouldBe` Left (TypeMismatch TypeUnit (TypeI64 :| []) "Unit")
+        it "throws if return statement's inferred type differs from return type"
+            $          runAnalyzer
+                           (checkItem $ Function
+                               (Identifier "f")
+                               [(Identifier "x", TypeName "I64")]
+                               (TypeName "I64")
+                               (Block [StatementReturn Unit] (Just $ IntLit 1))
+                           )
+            `shouldBe` Left (TypeMismatch TypeUnit (TypeI64 :| []) "Unit")
+        it
+                "throws if function has no return statement nor outer \
+                \expression and return type is other than Unit"
+            $          runAnalyzer
+                           (checkItem $ Function (Identifier "f")
+                                                 []
+                                                 (TypeName "Bool")
+                                                 (Block [StatementEmpty] Nothing)
+                           )
+            `shouldBe` Left (NoReturn (Identifier "f") TypeBool)
+        -- FIXME: should probably think of a more sophisticated way of analyzing
+        -- control flow to fix this test
+        it "throws if one branch of function has return but another doesn't"
+            $          runAnalyzer
+                           (checkItem $ Function
+                               (Identifier "f")
+                               []
+                               (TypeName "Bool")
+                               (Block
+                                   [ StatementExpr $ IfExpr
+                                         [ ( BoolLit False
+                                           , Block [StatementReturn $ BoolLit False]
+                                                   Nothing
+                                           )
+                                         ]
+                                         Nothing
+                                   ]
+                                   Nothing
+                               )
+                           )
+            `shouldBe` Left (NoReturn (Identifier "f") TypeBool)
 
--- TODO: test function declaration, function calls, loops, breaks & returns
+    describe "Function calls" $ do
+        it "throws if argument count doesn't match parameter count"
+            $          runAnalyzer
+                           (infer $ FnCall (Identifier "i64_to_str") [IntLit 1, IntLit 2]
+                           )
+            `shouldBe` Left (InvalidArgCount (Identifier "i64_to_str") 1 2)
+
+-- TODO: test loops, breaks & returns

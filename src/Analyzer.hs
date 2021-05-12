@@ -60,6 +60,8 @@ data TypeEnv = TypeEnv
     { fnTypes :: FnTypes -- ^ Type declarations of functions
     , varTypes :: VarTypes -- ^ Variables' types
     , returnType :: Type -- ^ Return type that is allowed in current context
+    , hasReturn :: Bool -- ^ True if current function body contains a return 
+                        -- statement, false otherwise.
     }
 
 -- | Exceptions that might arise when performing analysis on AST
@@ -74,6 +76,7 @@ data AnalyzerException
     | InvalidArgCount Identifier Int Int
     | CannotInferEmptyArray
     | DuplicateFnDeclaration Identifier
+    | NoReturn Identifier Type
     deriving Eq
 
 instance Show AnalyzerException where
@@ -137,6 +140,12 @@ instance Show AnalyzerException where
         CannotInferEmptyArray -> "Cannot infer type of an empty array"
         DuplicateFnDeclaration (Identifier name) ->
             "Duplicate declaration of function '" <> T.unpack name <> "'"
+        NoReturn (Identifier name) t -> mconcat
+            [ "Function '"
+            , T.unpack name
+            , "' has no return statement nor outer expression of type "
+            , display t
+            ]
 
 type Analyzer = StateT TypeEnv (Except AnalyzerException)
 
@@ -160,7 +169,7 @@ primitiveTypes = Map.fromList $ fmap
 
 -- | Initial environment of the analyzer
 initialEnv :: TypeEnv
-initialEnv = TypeEnv (fnTypes :| []) varTypes TypeUnit
+initialEnv = TypeEnv (fnTypes :| []) varTypes TypeUnit False
   where
     fnTypes = Map.fromList
         [ (Identifier "debug_env" , ([], TypeUnit))
@@ -234,10 +243,11 @@ withinNewScope action = do
 
 withReturnType :: Type -> Analyzer a -> Analyzer a
 withReturnType t analyzer = do
-    oldRetType <- gets returnType
-    modify' $ \env -> env { returnType = t }
+    oldRetType   <- gets returnType
+    oldHasReturn <- gets hasReturn
+    modify' $ \env -> env { returnType = t, hasReturn = False }
     result <- analyzer
-    modify' $ \env -> env { returnType = oldRetType }
+    modify' $ \env -> env { returnType = oldRetType, hasReturn = oldHasReturn }
     pure result
 
 -- | Infer the type of an expression
@@ -266,8 +276,8 @@ inferExpr = \case
                 unless (expected == t) $ errTypeMismatch expected t arrLit
                 pure t
             )
-            (head elemTypes)
-            (tail elemTypes)
+            (head elemTypes) -- head and tail are safe since elemTypes is surely
+            (tail elemTypes) -- non-empty here
 
     -- Variables
     Var    idf  -> lookupVarType idf
@@ -507,11 +517,15 @@ checkItem = \case
         paramTypes <- mapM getType typeNames
         retType    <- getType retTypeName
         -- Items should be declare before checking to support recursive calls!
-        withinNewScope $ do
+        withReturnType retType $ withinNewScope $ do
             mapM_ (uncurry declareVar) $ zip paramNames paramTypes
             analyzeStatements stmts
-            -- TODO: check that return statements are of same type
-            check retType (fromMaybe Unit outerExpr)
+            case outerExpr of
+                Nothing -> do
+                    hasReturn' <- gets hasReturn
+                    when (not hasReturn' && retType /= TypeUnit)
+                        $ throwError (NoReturn fnName retType)
+                Just expr -> check retType expr
 
 -- | Perform analysis of statements in the order it's expected
 analyzeStatements :: Foldable t => t Statement -> Analyzer ()
@@ -536,11 +550,14 @@ checkItemStatement = \case
 -- | Check statement's validity
 checkStatement :: Statement -> Analyzer ()
 checkStatement = \case
-    StatementEmpty                 -> pure ()
-    StatementExpr   expr           -> void $ infer expr
-    StatementBreak  expr           -> void $ infer expr
-    StatementReturn expr           -> void $ infer expr
-    StatementItem   _              -> pure ()
+    StatementEmpty       -> pure ()
+    StatementExpr   expr -> void $ infer expr
+    StatementBreak  expr -> void $ infer expr
+    StatementReturn expr -> do
+        expected <- gets returnType
+        check expected expr
+        modify' $ \env -> env { hasReturn = True }
+    StatementItem _                -> pure ()
     StatementLet idf typeName expr -> case typeName of
         Nothing    -> infer expr >>= declareVar idf
         Just tName -> do
