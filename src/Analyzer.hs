@@ -421,8 +421,12 @@ inferBinExpr allowedTypes lhs rhs = do
             (NonEmpty.fromList $ Set.toAscList allowedTypes)
             (show lhs)
 
+-- | Pick break expressions that given block contains
 pickBreakExprs :: Block -> [Expr]
-pickBreakExprs (Block stmts _) = mconcat $ fmap (cata alg) stmts
+pickBreakExprs (Block stmts outerExpr) = case outerExpr of
+    Just (ExprBlock block) ->
+        mconcat (fmap (cata alg) stmts) ++ pickBreakExprs block
+    _ -> mconcat $ fmap (cata alg) stmts
   where
     alg :: StatementF [Expr] -> [Expr]
     alg (StatementBreakF expr) =
@@ -437,17 +441,16 @@ pickBreakExprs (Block stmts _) = mconcat $ fmap (cata alg) stmts
         mconcat $ pickBreakExprs <$> foldMap pickNonLoopBlocks [expr]
     alg _ = []
 
+-- | Pick blocks from expression that are not loop bodies
 pickNonLoopBlocks :: Expr -> [Block]
 pickNonLoopBlocks = cata alg
   where
     alg :: ExprF [Block] -> [Block]
-    alg (IfExprF ifs altBlock) = case altBlock of
-        Nothing ->
-            let (conditions, conseqs) = unzip ifs
-            in  mconcat conditions ++ conseqs
-        Just alt ->
-            let (conditions, conseqs) = unzip ifs
-            in  alt : mconcat conditions ++ conseqs
+    alg (IfExprF ifs altBlock) =
+        let (conditions, conseqs) = unzip ifs
+        in  case altBlock of
+                Nothing  -> mconcat conditions ++ conseqs
+                Just alt -> alt : mconcat conditions ++ conseqs
     alg (ExprBlockF block      ) = [block]
     alg (NegateF    expr       ) = expr
     alg (PlusF      expr       ) = expr
@@ -469,30 +472,6 @@ pickNonLoopBlocks = cata alg
     alg (ArrayAccessF idxd idx ) = idxd ++ idx
     alg (FnCallF      _    args) = mconcat args
     alg _                        = []
-
--- TODO: move this example block to tests or something
-ex :: Block
-ex = Block
-    [ StatementEmpty
-    , StatementBreak Unit
-    , StatementExpr $ IfExpr
-        [ ( BoolLit True
-          , Block
-              [ StatementBreak (IntLit 1)
-              , StatementLet
-                  (Identifier "foo")
-                  (Just $ TypeName "I64")
-                  (ExprBlock $ Block [StatementBreak $ BoolLit False] Nothing)
-              , StatementBreak $ ExprBlock $ Block
-                  [StatementBreak $ IntLit 42, StatementBreak Unit]
-                  Nothing
-              ]
-              Nothing
-          )
-        ]
-        Nothing
-    ]
-    Nothing
 
 -- | @check t node@ checks that @node@ belonging to AST has given type @t@ 
 -- throwing an error if it is not.
