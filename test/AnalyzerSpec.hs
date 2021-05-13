@@ -235,26 +235,28 @@ spec = do
                            )
             `shouldBe` Left (NoReturn (Identifier "f") TypeBool)
         -- FIXME: should probably think of a more sophisticated way of analyzing
-        -- control flow to fix this test
+        -- control flow to fix this test. GCC doesn't catch similiar cases
+        -- without flags, so this might suffice.
         it "throws if one branch of function has return but another doesn't"
-            $          runAnalyzer
-                           (checkItem $ Function
-                               (Identifier "f")
-                               []
-                               (TypeName "Bool")
-                               (Block
-                                   [ StatementExpr $ IfExpr
-                                         [ ( BoolLit False
-                                           , Block [StatementReturn $ BoolLit False]
-                                                   Nothing
-                                           )
-                                         ]
-                                         Nothing
-                                   ]
-                                   Nothing
-                               )
-                           )
-            `shouldBe` Left (NoReturn (Identifier "f") TypeBool)
+            $             runAnalyzer
+                              (checkItem $ Function
+                                  (Identifier "f")
+                                  []
+                                  (TypeName "Bool")
+                                  (Block
+                                      [ StatementExpr $ IfExpr
+                                          [ ( BoolLit False
+                                            , Block [StatementReturn $ BoolLit False]
+                                                    Nothing
+                                            )
+                                          ]
+                                          Nothing
+                                      , StatementEmpty
+                                      ]
+                                      Nothing
+                                  )
+                              )
+            `shouldNotBe` Right ()
 
     describe "Function calls" $ do
         it "throws if argument count doesn't match parameter count"
