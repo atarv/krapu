@@ -10,10 +10,12 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 
 module Interpreter where
 
+import           Control.Applicative            ( (<|>) )
 import           Control.Monad
 import           Control.Monad.State.Strict
 import           Control.Monad.Except
 import           Data.Array.IO
+import           Data.Functor.Foldable
 import           Data.IORef
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
@@ -23,6 +25,7 @@ import           Data.Maybe
 import           Data.Text                      ( Text )
 
 import           AST
+import           Helpers                        ( onHeadOf )
 
 import qualified Data.List.NonEmpty            as NonEmpty
 import qualified Data.Map.Strict               as Map
@@ -109,11 +112,6 @@ lookupVar idf = findVarRef idf >>= \case
         let (Identifier var) = idf
         in  fail $ "Variable '" <> T.unpack var <> "' not found"
 
--- | @onHeadOf f xs@ returns the list @xs@ with function @f@ applied on it's 
--- first element.
-onHeadOf :: (a -> a) -> NonEmpty a -> NonEmpty a
-onHeadOf fn (x :| xs) = fn x :| xs
-
 -- | Define a new variable and it's value. Note that there is no check for
 --  existing values, because shadowing variables is allowed.
 defineVar :: Identifier -> Result -> Interpreter ()
@@ -191,6 +189,12 @@ clearReturn = modify' (\env -> env { returning = Nothing })
 clearBreak :: Interpreter ()
 clearBreak = modify' $ \env -> env { breaking = Nothing }
 
+-- | Tells whether program execution is canceled in current state due to 
+-- returning early or breaking out of a loop.
+executionCanceled :: Interpreter Bool
+executionCanceled =
+    liftM2 (||) (isJust <$> gets returning) (isJust <$> gets breaking)
+
 -- | Execute given action with break statement allowed (@True@) or disallowed 
 -- (@False@).
 withBreakAllowed :: Bool -> Interpreter a -> Interpreter a
@@ -242,9 +246,9 @@ evalBlock :: Block -> Interpreter Result
 evalBlock (Block stmts outerExpr) = withinNewScope $ do
     mapM_ addItem       stmts
     mapM_ execStatement stmts
-    returnVal <- gets returning
+    returnVal <- liftM2 (<|>) (gets returning) (gets breaking)
     case returnVal of
-        Nothing  -> eval outerExpr
+        Nothing  -> eval $ fromMaybe Unit outerExpr
         -- Outer expression is not evaluated when returning early
         Just val -> pure val
 
@@ -252,19 +256,20 @@ evalBlock (Block stmts outerExpr) = withinNewScope $ do
 -- their values, define new functions etc.) rather than return values (as
 -- opposed to expressions).
 execStatement :: Statement -> Interpreter ()
-execStatement stmt =
-    liftM2 (||) (isJust <$> gets returning) (isJust <$> gets breaking) >>= \case
+execStatement stmt = executionCanceled >>= flip
+    unless
     -- If function is returning or loop is exited with break, statements are 
     -- skipped until function and/or loop is exited. See 'evalBlock'
-        True  -> pure ()
-        False -> case stmt of
-            StatementEmpty              -> pure ()
-            StatementExpr expr          -> void $ eval expr
-            -- Items should be added to environment using 'addItem' before executing
-            StatementItem _             -> pure ()
-            StatementLet idf _type expr -> eval expr >>= defineVar idf
-            StatementReturn expr        -> eval expr >>= setReturn
-            StatementBreak  expr        -> eval expr >>= breakWith
+    (case stmt of
+        StatementEmpty              -> pure ()
+        StatementExpr expr          -> void $ eval expr
+        -- Items should be added to environment using 'addItem' before 
+        -- executing
+        StatementItem _             -> pure ()
+        StatementLet idf _type expr -> eval expr >>= defineVar idf
+        StatementReturn expr        -> eval expr >>= setReturn
+        StatementBreak  expr        -> eval expr >>= breakWith
+    )
 
 -- | Add item definition to environment. Other types of statements are ignored.
 addItem :: Statement -> Interpreter ()
@@ -346,7 +351,7 @@ eval = \case
 
     ExprBlock block      -> evalBlock block
     While predicate body -> withBreakAllowed True $ do
-        runExceptT . forever $ do
+        void $ runExceptT . forever $ do
             continue <- lift $ eval predicate >>= \case
                 ResBool b -> pure b
                 nonBool ->
@@ -375,7 +380,8 @@ eval = \case
     -- Function calls and primitive functions
     FnCall (Identifier "debug") args -> do
         evaledArgs <- traverse eval args
-        liftIO $ mapM_ print evaledArgs
+        canceled   <- executionCanceled
+        unless canceled $ liftIO $ mapM_ print evaledArgs
         pure ResUnit
     FnCall (Identifier "debug_env") args -> do
         unless (null args) $ void $ errWrongArgumentCount
@@ -400,7 +406,9 @@ eval = \case
             ResStr str -> pure . ResInt . read $ T.unpack str
             err        -> errUnexpectedType "str" err
         args -> errWrongArgumentCount (Identifier "str_to_i64") 1 (length args)
-    FnCall fnName args -> withBreakAllowed False $ evalFnCall fnName args
+    FnCall fnName args -> do
+        argValues <- traverse eval args
+        withBreakAllowed False $ evalFnCall fnName argValues
 
     -- Misc
     ArrayAccess exprIndexed exprIndex ->
@@ -451,13 +459,12 @@ eval = \case
     evalToPair :: Expr -> Expr -> Interpreter (Result, Result)
     evalToPair a b = (,) <$> eval a <*> eval b
 
-    evalFnCall :: Identifier -> [Expr] -> Interpreter Result
+    evalFnCall :: Identifier -> [Result] -> Interpreter Result
     evalFnCall fnName args = do
         (FnDef params body) <- lookupFn fnName
-        evaledArgs          <- traverse eval args
         let paramCount = length params
-            argCount   = length evaledArgs
-            argDefs    = zip params evaledArgs
+            argCount   = length args
+            argDefs    = zip params args
         when (paramCount /= argCount)
             $ void (errWrongArgumentCount fnName paramCount argCount)
         -- TODO: function params get their own scope which is probably 

@@ -1,5 +1,5 @@
 fn main() {
-    let arr: StringArray = ["incorrect", "not correct either", "Correct!"];
+    let arr: Str[] = ["incorrect", "not correct either", "Correct!"];
     println(arr[2]); // Should print correct!
     // Assignment can be chained
     arr[1] = arr[0] = "Now this is correct too!";
@@ -7,6 +7,6 @@ fn main() {
     println(arr[1]);
 
     // Arrays can even be multi-dimensional!
-    let twoDim: I64ArrayArray = [[1,2,3], [4,5,6], [7,8,9]];
+    let twoDim: I64[][] = [[1,2,3], [4,5,6], [7,8,9]];
     println(i64_to_str( twoDim[1][2] ));
 }

@@ -1,0 +1,11 @@
+fn main() {
+    let x: I64 = -1;
+    x = loop {
+        x = {
+            debug( { break 0; -5 }); // Exit loop here before executing function
+            -3
+        };
+        break -2;
+    };
+    debug(x); // Should print 0
+}

@@ -149,7 +149,8 @@ term = do
     -- This parser had to be written in this kind of unfortunate way because of 
     -- left recursion introduced by array access
     first <-
-        betweenParens expression
+        try unitLiteral
+        <|> betweenParens expression
         <|> ifExpr
         <|> blockExpr
         <|> whileLoop
@@ -189,11 +190,12 @@ whileLoop :: Parser Expr
 whileLoop = While <$ symbol "while" <*> expression <*> block
 
 -- | Parse a type identifier (starts with upper case letter)
-type_ :: Parser Type
-type_ = lexeme . label "type" $ do
-    initial <- T.singleton <$> upperChar
-    rest    <- T.pack <$> many alphaNumChar
-    pure . Type $ initial <> rest
+typeName :: Parser TypeName
+typeName = lexeme . label "type" $ do
+    initial  <- T.singleton <$> upperChar
+    rest     <- T.pack <$> many alphaNumChar
+    brackets <- mconcat <$> many (chunk "[]")
+    pure . TypeName $ initial <> rest <> brackets
 
 -- | Parse an identifier of other language constructs than types
 identifier :: Parser Identifier
@@ -207,7 +209,7 @@ identifier = lexeme . label "identifier" $ do
 
 -- | Parse a single function parameter
 functionParam :: Parser Parameter
-functionParam = (,) <$> identifier <* symbol ":" <*> type_
+functionParam = (,) <$> identifier <* symbol ":" <*> typeName
 
 -- | Parse a statement
 statement :: Parser Statement
@@ -242,7 +244,7 @@ letStatement :: Parser Statement
 letStatement =
     StatementLet
         <$> (symbol "let" *> identifier)
-        <*> (symbol ":" *> type_)
+        <*> optional (symbol ":" *> typeName)
         <*> (symbol "=" *> expression)
         <*  symbol ";"
 
@@ -253,7 +255,7 @@ breakStatement =
 -- | Parse a block (a bunch of statements enclosed in braces). It may have an 
 -- outer expression, which is used as block's return value.
 block :: Parser Block
-block = betweenBraces $ Block <$> many statement <*> option Unit expression
+block = betweenBraces $ Block <$> many statement <*> optional expression
 
 -- | Parse a function call
 functionCall :: Parser Expr
@@ -271,7 +273,7 @@ functionDeclaration =
         <*> block
   where
     returnType =
-        label "return type" $ option (Type "Unit") $ symbol "->" >> type_
+        label "return type" $ option (TypeName "Unit") $ symbol "->" >> typeName
     paramList =
         betweenParens (functionParam `sepBy` symbol ",") <?> "parameter list"
 

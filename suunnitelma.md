@@ -33,9 +33,10 @@ Tuetut alustat:
 
  - [x] aliohjelmat (0,5op)
     - [x] rekursiolla (+0,5op)
-- [ ] merkkijonosyöte ja -tulostus (0,5op)
 - [ ] tietueet ja variantit (1op)
-- [ ] yksinkertainen staattinen tyypintarkastus (1op)
+- [x] yksinkertainen staattinen tyypintarkastus (1op)
+- [x] taulukot moniulotteisena (0,5op)
+- [x] `break` ja `return`-lauseet (??op)
 
 
 ## Työkalut

@@ -9,6 +9,7 @@ import           System.Environment
 import           System.Exit
 import           System.IO
 
+import           Analyzer
 import           Interpreter
 import           Parser
 
@@ -19,6 +20,7 @@ data Flag
     | Interpret
     | Repl
     | Help
+    | Check
 
 options :: [OptDescr Flag]
 options =
@@ -29,6 +31,7 @@ options =
              (NoArg Interpret)
              "Parse and interpret a program (default)"
     , Option ['p'] ["parse"] (NoArg ParseOnly) "Parse the program and print AST"
+    , Option ['c'] ["check"] (NoArg Check)     "Typecheck file"
     ]
 
 main :: IO ()
@@ -40,6 +43,8 @@ main = do
         ([ParseOnly], [src]     , []  ) -> withFile src ReadMode (parseAst src)
         ([Interpret], []        , []  ) -> run "stdin" [] stdin
         ([Interpret], src : args, []  ) -> withFile src ReadMode (run src args)
+        ([Check    ], []        , []  ) -> run "stdin" [] stdin
+        ([Check    ], src : _   , []  ) -> withFile src ReadMode (checkFile src)
         ([Repl     ], args      , []  ) -> repl args
         ([]         , []        , []  ) -> run "stdin" [] stdin
         ([]         , src : args, []  ) -> withFile src ReadMode (run src args)
@@ -66,8 +71,10 @@ parseAst src handle = do
 run :: String -> [String] -> Handle -> IO ()
 run src args handle = do
     content <- T.hGetContents handle
-    either printParseError (runProgram args) $ parseCrate src content
-    where printParseError err = T.putStrLn err >> exitFailure
+    let crate = parseCrate src content >>= analyzeCrate
+    case crate of
+        Left  err   -> T.putStrLn err >> exitFailure
+        Right crate -> runProgram args $ optimizeCrate crate
 
 prompt :: Text
 prompt = "krapu>"
@@ -84,3 +91,14 @@ repl args = runRepl args prompInput
                 T.putStrLn err
                 prompInput
             Right stmt -> pure stmt
+
+checkFile :: String -> Handle -> IO ()
+checkFile src handle = do
+    content <- T.hGetContents handle
+    case parseCrate src content >>= analyzeCrate of
+        Left err -> do
+            T.putStrLn err
+            exitFailure
+        Right _ -> do
+            putStrLn $ "Checked " <> src
+            exitSuccess

@@ -8,9 +8,17 @@ Maintainer     : a.aleksi.tarvainen@student.jyu.fi
 Based on Rust reference <https://doc.rust-lang.org/reference/>, though a lot
 of corners were cut.
 -}
+{-# LANGUAGE DeriveFunctor     #-}
+{-# LANGUAGE DeriveFoldable    #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
+
 module AST where
 
+import           Data.Functor.Foldable.TH       ( makeBaseFunctor )
 import           Data.Text                      ( Text )
+import           Data.List.NonEmpty             ( )
 
 
 -- | Following terminology of Rust, a crate is a package that compiles to a 
@@ -19,23 +27,23 @@ import           Data.Text                      ( Text )
 newtype Crate = Crate [Item] deriving Show
 
 -- | Type represents type names
-newtype Type = Type Text deriving (Show, Eq, Ord)
+newtype TypeName = TypeName Text deriving (Show, Eq, Ord)
 
 -- | Identifiers are the names of variables, constants, parameters etc.
 newtype Identifier = Identifier Text deriving (Show, Eq, Ord)
 
 -- | Item is a single component of a crate. Items shouldn't change during
 -- runtime.
-data Item = Function Identifier [Parameter] Type Block deriving (Show, Eq)
+data Item = Function Identifier [Parameter] TypeName Block deriving (Show, Eq)
 
 -- | Function parameter
-type Parameter = (Identifier, Type)
+type Parameter = (Identifier, TypeName)
 
 -- | Block groups statements together. It also forms a new scope for it's 
 -- contents.
 data Block
     -- | Outer expression will determine the return value of the block
-    = Block [Statement] Expr
+    = Block [Statement] (Maybe Expr)
     deriving (Show, Eq)
 
 -- | Single statement
@@ -43,7 +51,7 @@ data Statement
     = StatementEmpty
     | StatementItem Item
     | StatementExpr Expr
-    | StatementLet Identifier Type Expr
+    | StatementLet Identifier (Maybe TypeName) Expr
     | StatementReturn Expr
     | StatementBreak Expr
     deriving (Show, Eq)
@@ -86,3 +94,10 @@ data Expr
     | FnCall Identifier [Expr]
     | ArrayAccess Expr Expr
     deriving (Show, Eq)
+
+-- These make it possible to use recursion schemes from the library 
+-- recursion-schemes. I used it because otherwise I would have had to write many
+-- of the instances like Show and Ord for the datatypes by hand. 
+-- This Template Haskell magic generates those without any effort.
+makeBaseFunctor ''Expr
+makeBaseFunctor ''Statement
