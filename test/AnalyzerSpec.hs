@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module AnalyzerSpec (spec) where
+module AnalyzerSpec
+    ( spec
+    )
+where
 
 import           Data.List.NonEmpty
 import           Data.Text                      ( Text )
@@ -340,3 +343,16 @@ spec = do
             `shouldBe` Left
                            (TypeMismatch TypeStr (TypeUnit :| []) "Str \"fail\""
                            )
+
+    describe "Constant expression evaluation" $ do
+        it
+                "evaluates expressions consistincg of constants and leaves the \
+                \ other untouched"
+            $          evalConstExpr
+                           (   (IntLit 1 :+ IntLit 2)
+                           :-  ((IntLit 4 :* IntLit 3) :/ IntLit 4)
+                           :== (Var (Identifier "x") :+ Var (Identifier "y"))
+                           )
+            `shouldBe` (   IntLit 0
+                       :== (Var (Identifier "x") :+ Var (Identifier "y"))
+                       )

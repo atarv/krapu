@@ -22,8 +22,8 @@ import qualified Data.Map.Strict               as Map
 onHeadOf :: (a -> a) -> NonEmpty a -> NonEmpty a
 onHeadOf fn (x :| xs) = fn x :| xs
 
--- | Lookup through a foldable structure containing maps. Stops once any match 
--- is found.
+-- | Lookup through a foldable structure containing maps. Stops once a match 
+-- is found, so this works for infinite structures too.
 --
 -- >>> lookupMaps "k" $ [Map.fromList []] ++ repeat (Map.fromList [("k", 1)])
 -- Just 1

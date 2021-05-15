@@ -16,7 +16,9 @@ import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.State.Strict
 import           Data.Bifunctor
-import           Data.Functor.Foldable          ( cata )
+import           Data.Functor.Foldable          ( cata
+                                                , embed
+                                                )
 import           Data.List.NonEmpty             ( NonEmpty(..)
                                                 , (<|)
                                                 )
@@ -249,6 +251,8 @@ withReturnType t analyzer = do
     result <- analyzer
     modify' $ \env -> env { returnType = oldRetType, hasReturn = oldHasReturn }
     pure result
+
+-- * Type checking & inference
 
 -- | Infer the type of an expression
 -- 
@@ -561,3 +565,63 @@ runAnalyzerIO = either (fail . show) pure . runAnalyzer
 
 runAnalyzer :: Analyzer a -> Either AnalyzerException a
 runAnalyzer analyzer = runExcept $ evalStateT analyzer initialEnv
+
+-- * Optimization
+
+-- | Evaluate expressions that consist solely of constants
+--
+-- >>> evalConstExpr (BoolLit True :&& BoolLit False :== Var (Identifier "q"))
+-- BoolLit False :== Var (Identifier "q")
+evalConstExpr :: Expr -> Expr
+evalConstExpr = cata alg
+  where
+    alg :: ExprF Expr -> Expr
+    alg (IntLit a :+$ IntLit b   ) = IntLit (a + b)
+    alg (PlusF expr              ) = expr
+    alg (IntLit  a :-$  IntLit  b) = IntLit (a - b)
+    alg (IntLit  a :/$  IntLit  b) = IntLit (a `div` b)
+    alg (IntLit  a :*$  IntLit  b) = IntLit (a * b)
+    alg (IntLit  a :==$ IntLit  b) = BoolLit (a == b)
+    alg (Str     a :==$ Str     b) = BoolLit (a == b)
+    alg (BoolLit a :==$ BoolLit b) = BoolLit (a == b)
+    alg (Unit      :==$ Unit     ) = BoolLit True
+    alg (IntLit  a :!=$ IntLit  b) = BoolLit (a /= b)
+    alg (Str     a :!=$ Str     b) = BoolLit (a /= b)
+    alg (BoolLit a :!=$ BoolLit b) = BoolLit (a /= b)
+    alg (Unit      :!=$ Unit     ) = BoolLit False
+    alg (BoolLit a :||$ BoolLit b) = BoolLit (a || b)
+    alg (BoolLit a :&&$ BoolLit b) = BoolLit (a && b)
+    alg (IntLit  a :>$  IntLit  b) = BoolLit (a > b)
+    alg (Str     a :>$  Str     b) = BoolLit (a > b)
+    alg (BoolLit a :>$  BoolLit b) = BoolLit (a > b)
+    alg (IntLit  a :>=$ IntLit  b) = BoolLit (a >= b)
+    alg (Str     a :>=$ Str     b) = BoolLit (a >= b)
+    alg (BoolLit a :>=$ BoolLit b) = BoolLit (a >= b)
+    alg (IntLit  a :<$  IntLit  b) = BoolLit (a < b)
+    alg (Str     a :<$  Str     b) = BoolLit (a < b)
+    alg (BoolLit a :<$  BoolLit b) = BoolLit (a < b)
+    alg (IntLit  a :<=$ IntLit  b) = BoolLit (a <= b)
+    alg (Str     a :<=$ Str     b) = BoolLit (a <= b)
+    alg (BoolLit a :<=$ BoolLit b) = BoolLit (a <= b)
+    alg expr                       = embed expr
+
+-- | Perform optimizations on a single statment
+optimizeStatement :: Statement -> Statement
+optimizeStatement = \case
+    StatementItem item          -> StatementItem $ optimizeItem item
+    StatementLet idf type' expr -> StatementLet idf type' (evalConstExpr expr)
+    StatementExpr   expr        -> StatementExpr $ evalConstExpr expr
+    StatementReturn expr        -> StatementReturn $ evalConstExpr expr
+    StatementBreak  expr        -> StatementBreak $ evalConstExpr expr
+    stmt                        -> stmt
+
+-- | Perform optimizations on an item
+optimizeItem :: Item -> Item
+optimizeItem = \case
+    Function idf params retType (Block stmts outerExpr) ->
+        Function idf params retType
+            $ Block (optimizeStatement <$> stmts) (evalConstExpr <$> outerExpr)
+
+-- | Perform optimizations on a crate
+optimizeCrate :: Crate -> Crate
+optimizeCrate (Crate items) = Crate (optimizeItem <$> items)
