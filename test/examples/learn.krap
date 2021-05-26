@@ -1,0 +1,189 @@
+/*  Learn Krapu in Y minutes
+ * 
+ * Krapu is an imperative statically typed interpreted programming language 
+ * with syntax inspired by Rust.
+ * 
+ * This is an example of a multiline comment. As usual, comments are ignored
+ * when running a program. Nested multiline comments are not supported.
+ */
+
+// This is a single line comment.
+
+// Krapu programs consist of a crate, which is not unlike a module. 
+// Crates consist of items, which, at the current implementation state, are
+// functions.
+
+// For a crate to be runnable, it must contain a function called 'main',
+// which acts the program's entry point.
+fn main() {
+
+    // Every program has the following implicitly introduced global variables:
+    argc; // which tells how many arguments were passed to program
+    argv; // the passed arguments as strings
+
+    func();
+    compare(1337, -42);
+    statements();
+    expressions();
+    primitiveFunctions();
+    println("Finished!")
+}
+
+/*** FUNCTIONS ***/
+
+// Functions can be declared by typing 'fn' followed by a space and function's 
+// name. Then between parentheses is function's parameter list, which may be 
+// empty. 
+fn func() { }
+
+// A parameter consists of name and type, which are separated by a colon
+// (:). The parameters themselves are separated by commas (,).
+// Function's return type may be declared by writing '-> TYPE' where
+// TYPE is one of language's types: I64, Str, Bool, Unit, TYPE[].
+// If return type is not explicitly declared, it is Unit.
+fn compare(a: I64, b: I64) -> I64 {
+
+    // This is the function's body, a block.
+    // Blocks consist of any number of statements, which are separated by 
+    // semicolons. The last statement's semicolon may be omitted, in which
+    // case it's called an outer expression. If defined, the outer expression's
+    // result is used as blocks return value. Otherwise the block evaluates to
+    // Unit.
+
+    // Example of an if expression. Each branch must have the same return value.
+    if a < b {
+        -1
+    } else if a == b {
+        0
+    }
+    else { // else may be omitted, but then return value must be Unit
+        1
+    } // Semicolon omitted (this is an outer expression)
+}
+
+/*** STATEMENTS ***/
+
+fn statements() -> Bool {
+    // An expression (function call in this case) ending in a semicolon is a statement
+    func(); 
+
+    // Let statement introduces a new variable, which can be used in expressions.
+    let x = 0xC0DE; 
+    // The type of the variable can be either inferred or explicitly declared.
+    let y: Bool = isKrap();
+
+    // New functions can be declared inside blocks. They are visible to only
+    // current block and the blocks inside it. Functions are hoisted, which 
+    // means that they can be called before their declaration in current scope.
+    fn isKrap() -> Bool {
+        true
+    }
+    
+    ; // Empty statement. This does nothing.
+
+    // There's break statement, but that is introduced later when discussing 
+    // loops.
+
+    // Return statement causes program flow to leave the function with given 
+    // expression's value as it's return value. If expression is omitted
+    // () (unit) is returned.
+    return y;
+}
+
+/*** EXPRESSIONS ***/
+
+fn expressions() {
+    // Expressions may consist of combinations of:
+    1; 0b11; 0xfefe; 0o755; // Integer literals
+    // in decimal, binary, hexadecimal and octal formats respectively
+
+    true; false; // Boolean literals
+    "expr\n\t\"res\""; // String literals
+    [1,2,3]; ["arr"]; // Array literals
+    (); // Unit literal
+    func(); // Function calls
+    1 + 2 - 3 / (+4) * (-5); // Arithmetic operations
+    true && false || !true; // Boolean arithmetic operations
+
+    // Comparison and equality testing operations
+    1 < 2 <= true > false >= true == false != true;
+    
+    let var = 450;
+    let temp = var + 2; // Variables
+    let arr = [-1,-2,-3];
+    temp = temp + arr[0]; // Assignment operator and array access
+
+    // By the way, arrays can be multi-dimensional
+    let multi = [[1,2,3], [4,5,6]];
+    let five = multi[1][1];
+    blockExprs();
+}
+
+// Block expressions are (obviously) expressions that have blocks
+fn blockExprs() {
+    // Block by itself is an expression
+    let blocksAdded = { 1 } + { ; -2 };
+
+    // If expression
+    let x = 2;
+    let result = if blocksAdded < 0 {
+        "was negative"
+    } else {
+        "was positive"
+    };
+    println("Result");
+    println(result);
+
+    // There are two kinds of loops which both can be used as expressions
+    // while loop
+    let i: I64 = 0;
+    let resWhile = while i < 10 { // Loop condition must be of type Bool
+        i = i + 4;
+    };
+    debug(resWhile); // While loops may only return unit
+
+    // loop loop, which is an infinite loop although it may be exited with a 
+    // break statement
+    let j = 0;
+    let loopRes = loop {
+        j = j + 7;
+        if j < 100 && j >= 50 {
+            // Break statement accepts an expression which value is used as 
+            // loop expression's value
+            break j;
+        };
+    };
+    debug(loopRes);
+} 
+
+/*** PRIMITIVE FUNCTIONS ***/
+
+fn primitiveFunctions() {
+    // These functions are immediately available
+    
+    // Debug any number of arguments. Each value is printed on their own line
+    // Returns: Unit
+    debug(1+2,"str", [3]);
+
+    // Prints the current environment/context (variables, functions).
+    // Each scope is separated with dashes. Current scope is printed first 
+    // (starting from top).
+    // Returns: Unit
+    debug_env();
+
+    // Print the string and a newline to standard output
+    // Returns: Unit
+    println("Hello!"); 
+
+    // Convert an integer to a string
+    // Returns: Str
+    i64_to_str(123);
+
+    // Convert a string to an integer. If the conversion fails, the whole 
+    // program crashes.
+    // Returns: I64
+    str_to_i64("0x42"); 
+    str_to_i64("42"); 
+
+    fn f() {} // Example function for demonstrating debug_env()
+}

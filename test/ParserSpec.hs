@@ -140,6 +140,11 @@ spec = do
             $             parse statement "" "let x = 123 ;"
             `shouldParse` StatementLet (Identifier "x") Nothing (IntLit 123)
 
+    describe "variables" $ do
+        it "which begin with a keyword name"
+            $             parse variable "" "iffe"
+            `shouldParse` Var (Identifier "iffe")
+
     describe "function declarations" $ do
         it "can contain more function definitions"
             $             parse item "" "fn f() { fn g() { 2 } g() }"

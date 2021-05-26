@@ -15,6 +15,7 @@ module Parser where
 import           Data.Bifunctor                 ( bimap
                                                 , first
                                                 )
+import           Data.List
 import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
@@ -76,7 +77,7 @@ booleanLiteral =
 -- (decimal, binary, octal, hexadecimal).
 integerLiteral :: Parser Expr
 integerLiteral =
-    fmap IntLit . lexeme . label "integer literal" $ nonDefaultBase <|> base10
+    fmap IntLit . label "integer literal" $ nonDefaultBase <|> base10
   where
     base10         = Lex.signed spaceConsumer (lexeme Lex.decimal)
     nonDefaultBase = choice (chunk <$> ["0b", "0o", "0x"]) >>= \case
@@ -118,7 +119,8 @@ operatorTable =
 -- | Parse a literal expression, which directly describes a value.
 literal :: Parser Expr
 literal =
-    integerLiteral
+    lexeme
+        $   integerLiteral
         <|> try booleanLiteral
         <|> unitLiteral
         <|> strLiteral
@@ -151,10 +153,10 @@ term = do
     first <-
         try unitLiteral
         <|> betweenParens expression
-        <|> ifExpr
+        <|> try ifExpr
         <|> blockExpr
-        <|> whileLoop
-        <|> loop
+        <|> try whileLoop
+        <|> try loop
         <|> literal
         <|> try functionCall
         <|> variable
@@ -163,7 +165,7 @@ term = do
         []       -> pure first
         [index ] -> pure $ ArrayAccess first index
         -- Ok ok, this feels way too hacky but works so far
-        (i : is) -> pure $ foldl ArrayAccess (ArrayAccess first i) is
+        (i : is) -> pure $ foldl' ArrayAccess (ArrayAccess first i) is
 
 -- | Parses an expression
 expression :: Parser Expr
@@ -204,7 +206,7 @@ identifier = lexeme . label "identifier" $ do
     rest    <- many (alphaNumChar <|> single '_')
     let idf = T.singleton initial <> T.pack rest
     if isReserved idf
-        then fail "keywords cannot be used as identifiers"
+        then fail $ "Keywords cannot be used as identifiers: " <> T.unpack idf
         else pure $ Identifier idf
 
 -- | Parse a single function parameter
