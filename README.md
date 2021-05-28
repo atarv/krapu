@@ -8,7 +8,7 @@
 
 ## Kääntäminen ja ajaminen
 
-Varmista, että sinulla on asennettuna `stack`. Jos ei, noudata näitä
+Varmista, että sinulla on asennettuna `stack`. Jos ei, noudata 
 [asennusohjeita](https://docs.haskellstack.org/en/stable/README/#how-to-install).
 Toimivuus on todettu ainoastaan Linuxilla (AMD64), mutta hyvällä tuurilla toimii
 luultavasti muillakin alustoilla.
@@ -19,6 +19,8 @@ maailma!");` varmistuakseen siitä, että ohjelma tosiaan kääntyi.
 
 Esimerkkiohjelmia löytyy kansiosta `test/examples` ja niitä voi ajaa antamatta
 yhtäkään lippua tulkille, esim. `stack run -- test/examples/factorial.krap`.
+Tulkille annettavissa olevista lipuista saa lyhyen ohjeistuksen ajamalla `stack
+run -- --help`.
 
 Tulkin testit voi ajaa komennolla `stack test`.
 
